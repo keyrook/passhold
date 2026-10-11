@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./.tsbuild",
+    "rootDir": "../..",
+    "jsx": "react-jsx",
+    "types": ["chrome", "vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@passhold/core": ["../../packages/core/src/index.ts"],
+      "@keyrook/brand": ["../../vendor/keyrook-brand/src/index.ts"],
+      "~/*": ["./src/*"]
+    },
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "../../vendor/keyrook-brand/src/**/*.ts"],
+  "references": [{ "path": "../../packages/core" }]
+}

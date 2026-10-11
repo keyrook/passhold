@@ -1,0 +1,61 @@
+# Typecheck, unit tests, the extension in a real Chromium, and the store zip,
+# on every push and pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run
+
+  e2e:
+    name: Extension in Chromium
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Extensions need the full Chromium build in new headless mode, not the
+      # headless shell; `chromium` installs both.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -w @passhold/extension
+      - run: npm run zip -w @passhold/extension
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: passhold-${{ github.sha }}
+          path: |
+            release/*.zip
+            .tmp/test-results/
+          if-no-files-found: ignore

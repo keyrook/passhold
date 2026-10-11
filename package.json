@@ -1,0 +1,30 @@
+{
+  "name": "passhold",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Passhold — a password manager by Keyrook. Chrome extension first.",
+  "license": "GPL-3.0-or-later",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w @passhold/extension",
+    "zip": "npm run zip -w @passhold/extension",
+    "typecheck": "tsc -b --pretty",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.6.3",
+    "vite": "^6.4.3",
+    "vitest": "^2.1.9"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keyrook/passhold.git"
+  }
+}

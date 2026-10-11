@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Passhold</title>
+    <style>
+      /* The same colour scheme as any page around it: a frame whose scheme differs
+         from its embedder's gets an opaque backdrop, and a dark card would sit on a
+         square of night. The card draws its own colours either way. */
+      html, html[data-theme], body { background: transparent !important; color-scheme: normal !important; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/prompt/main.tsx"></script>
+  </body>
+</html>
