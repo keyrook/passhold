@@ -14,5 +14,7 @@ export default defineConfig({
     { name: 'e2e', testDir: './e2e' },
     // Every screen in light and dark, for a person to look at: `npm run review`.
     { name: 'review', testDir: './review', timeout: 120_000 },
+    // The stores' screenshots, one set per language: `npm run store:shots`.
+    { name: 'store', testDir: './review', testMatch: 'store.shots.ts' },
   ],
 });

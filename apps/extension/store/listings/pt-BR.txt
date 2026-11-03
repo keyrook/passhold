@@ -1,0 +1,43 @@
+O Passhold é um gerenciador de senhas grátis para sempre que preenche seus logins, guarda suas chaves de acesso e gera senhas fortes. Seu cofre é criptografado de ponta a ponta no seu computador e sincronizado entre seus computadores com uma conta Keyrook. É de código aberto, então qualquer pessoa pode conferir como funciona.
+
+PREENCHIMENTO AUTOMÁTICO EM TODO SITE
+• Um clique em um campo de login preenche a conta certa para aquele site.
+• Salva logins novos quando você entra, e atualiza os que você muda.
+• Preenche cartões e endereços no checkout, só onde você escolher.
+• Entra com chaves de acesso nos sites que as oferecem.
+• Funciona em formulários dentro de frames, como são feitos muitos logins de bancos e lojas.
+• Um atalho de teclado abre seu cofre a qualquer momento.
+
+FORTES E ÚNICAS
+• Gerador de senhas: uma senha forte e única para cada conta.
+• Escolha o tamanho e os caracteres, e deixe de fora os parecidos, como 0 e O.
+• Verificação de segurança: encontra senhas fracas e repetidas, e mostra o que corrigir primeiro.
+
+SINCRONIZADO ENTRE SEUS COMPUTADORES
+• Uma conta Keyrook, com senha própria ou com Google ou GitHub.
+• Desbloqueie com Touch ID, Windows Hello, um PIN ou uma chave de segurança.
+• Backups criptografados que você guarda por conta própria.
+
+FÁCIL DE ENTRAR, FÁCIL DE SAIR
+• Importe seus logins com um arquivo CSV, do seu navegador ou da maioria dos outros gerenciadores.
+• Exporte-os a qualquer momento, como arquivo CSV ou backup criptografado. Seus dados continuam sendo seus.
+
+PRIVADO DESDE O PROJETO
+• Zero-knowledge: tudo é criptografado com AES-256-GCM no seu computador antes de sair. A Keyrook guarda o que você sincroniza e não consegue ler.
+• A chave que abre seu cofre nunca chega à Keyrook.
+• Sem anúncios, sem rastreadores, sem analytics.
+• Os ícones dos sites já vêm no app, então nenhum servidor fica sabendo onde você tem contas.
+• Um login só é oferecido no próprio site, então uma página falsa parecida não recebe nada.
+• Campos que você não vê nunca são preenchidos, e cartões só são preenchidos em páginas seguras.
+• Uma senha copiada é apagada da área de transferência depois de um tempo.
+• Código aberto: leia o código no GitHub.
+
+GRÁTIS PARA SEMPRE
+• Tudo acima é grátis, para sempre e para todos. Os planos pagos só acrescentam extras, e nada disso jamais vai passar a ser pago.
+
+TAMBÉM NO SEU COFRE
+• Cartões de pagamento, endereços e notas seguras, em pastas, com campos personalizados.
+• Uma lixeira que guarda o que você apaga, e cada versão anterior de um login.
+• Bloqueia sozinho quando você se afasta.
+
+Feito pela Keyrook, a criadora do Keyrook Authenticator.

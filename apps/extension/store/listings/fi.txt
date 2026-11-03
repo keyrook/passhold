@@ -1,0 +1,43 @@
+Passhold on salasanahallinta, ilmainen ikuisesti, joka täyttää kirjautumistietosi automaattisesti, säilyttää passkeysi ja luo vahvoja salasanoja. Holvisi on salattu päästä päähän tietokoneellasi, ja se synkronoituu tietokoneidesi välillä Keyrook-tilin kautta. Se on avointa lähdekoodia, joten kuka tahansa voi tarkistaa, miten se toimii.
+
+TÄYTTÖ JOKAISELLA SIVUSTOLLA
+• Yksi napsautus kirjautumiskenttään täyttää oikean tilin kyseiselle sivustolle.
+• Tallentaa uudet kirjautumistiedot kirjautuessasi ja päivittää muuttamasi.
+• Täyttää kortit ja osoitteet kassalla, vain siellä missä valitset.
+• Kirjaa sinut sisään passkeyllä niillä sivustoilla, jotka tukevat sitä.
+• Toimii kehyksiin upotetuissa lomakkeissa, joita monet pankkien ja kauppojen kirjautumissivut käyttävät.
+• Pikanäppäin avaa holvisi milloin tahansa.
+
+VAHVA JA YKSILÖLLINEN
+• Salasanageneraattori: vahva ja ainutlaatuinen salasana jokaiselle tilille.
+• Valitse pituus ja merkit, ja jätä pois sekaantuvat merkit, kuten 0 ja O.
+• Turvallisuustarkistus: löytää heikot ja useammin käytetyt salasanat ja näyttää, mitä korjata ensin.
+
+SYNKRONOINTI TIETOKONEIDEN VÄLILLÄ
+• Yksi Keyrook-tili, jossa on oma salasana tai jolla kirjaudut Googlella tai GitHubilla.
+• Lukituksen voi avata Touch ID:llä, Windows Hellolla, PIN-koodilla tai suojausavaimella.
+• Salatut varmuuskopiot, jotka säilytät itse.
+
+HELPPO TULLA, HELPPO LÄHTEÄ
+• Tuo kirjautumistietosi CSV-tiedostolla selaimesta tai useimmista muista hallinnoista.
+• Vie ne milloin tahansa CSV-tiedostona tai salattuna varmuuskopiona. Tietosi pysyvät sinun.
+
+YKSITYISYYS ALUSTA ALKAEN
+• Zero-knowledge: kaikki salataan AES-256-GCM-salauksella tietokoneellasi ennen kuin se lähtee. Keyrook tallentaa synkronoimasi tiedot, eikä pysty lukemaan niitä.
+• Avain, joka avaa holvisi, ei koskaan päädy Keyrookille.
+• Ei mainoksia, ei seurantaa, ei analytiikkaa.
+• Sivustojen kuvakkeet ovat sisäänrakennettuja, joten mikään palvelin ei tiedä, missä sinulla on tilejä.
+• Tili tarjotaan vain omalla sivustollaan, joten väärennetty sivu ei saa mitään.
+• Näkymättömiä kenttiä ei täytetä koskaan, ja kortit täytetään vain suojatuilla sivuilla.
+• Kopioitu salasana poistetaan leikepöydältä hetken kuluttua.
+• Avoin lähdekoodi: lue koodi GitHubissa.
+
+IKUISESTI ILMAINEN
+• Kaikki yllä mainittu on ilmaista, ikuisesti ja kaikille. Maksulliset paketit tuovat vain lisäominaisuuksia, eikä mikään tästä muutu koskaan maksulliseksi.
+
+MYÖS HOLVISSASI
+• Maksukortit, osoitteet ja salaiset muistiinpanot kansioissa, mukautetuilla kentillä.
+• Roskakori, joka säilyttää poistamasi, ja jokaisen kirjautumistiedon aiemmat versiot.
+• Lukittuu itsestään, kun lähdet koneen äärestä.
+
+Keyrookin tekemä, Keyrook Authenticatorin tekijä.

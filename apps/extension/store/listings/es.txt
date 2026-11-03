@@ -1,0 +1,43 @@
+Passhold es un gestor de contraseñas gratis para siempre que rellena tus inicios de sesión, guarda tus claves de acceso y genera contraseñas seguras. Tu caja fuerte se cifra de extremo a extremo en tu ordenador y se sincroniza entre tus ordenadores con una cuenta de Keyrook. Es de código abierto, así que cualquiera puede comprobar cómo funciona.
+
+RELLENO AUTOMÁTICO EN CADA SITIO
+• Un clic en un campo de inicio de sesión rellena la cuenta correcta de ese sitio.
+• Guarda los inicios de sesión nuevos al entrar, y actualiza los que cambias.
+• Rellena tarjetas y direcciones al pagar, solo donde tú elijas.
+• Te inicia sesión con claves de acceso en los sitios que las ofrecen.
+• Funciona en formularios dentro de marcos, como están hechos muchos inicios de sesión de bancos y tiendas.
+• Un atajo de teclado abre tu caja fuerte en cualquier momento.
+
+FUERTES Y ÚNICAS
+• Generador de contraseñas: una contraseña fuerte y única para cada cuenta.
+• Elige la longitud y los caracteres, y deja fuera los parecidos, como 0 y O.
+• Revisión de seguridad: encuentra las contraseñas débiles y repetidas, y muestra qué arreglar primero.
+
+SINCRONIZADO ENTRE TUS ORDENADORES
+• Una cuenta de Keyrook, con su propia contraseña o con Google o GitHub.
+• Desbloquea con Touch ID, Windows Hello, un PIN o una llave de seguridad.
+• Copias de seguridad cifradas que guardas tú mismo.
+
+FÁCIL DE LLEVAR, FÁCIL DE DEJAR
+• Importa tus inicios de sesión con un archivo CSV, desde tu navegador o de la mayoría de otros gestores.
+• Expórtalos en cualquier momento, como archivo CSV o como copia de seguridad cifrada. Tus datos siguen siendo tuyos.
+
+PRIVADO DESDE EL DISEÑO
+• Conocimiento cero: todo se cifra con AES-256-GCM en tu ordenador antes de salir. Keyrook guarda lo que sincronizas y no puede leerlo.
+• La clave que abre tu caja fuerte nunca llega a Keyrook.
+• Sin anuncios, sin rastreadores, sin analítica.
+• Los iconos de los sitios están integrados, así que ningún servidor sabe dónde tienes cuentas.
+• Un inicio de sesión solo se ofrece en su propio sitio, así que una página parecida no recibe nada.
+• Los campos que no ves nunca se rellenan, y las tarjetas solo se rellenan en páginas seguras.
+• Una contraseña copiada se borra del portapapeles al cabo de un rato.
+• Código abierto: lee el código en GitHub.
+
+GRATIS PARA SIEMPRE
+• Todo lo anterior es gratis, para siempre y para todos. Los planes de pago solo suman extras, y nada de esto pasará nunca a ser de pago.
+
+TAMBIÉN EN TU CAJA FUERTE
+• Tarjetas de pago, direcciones y notas seguras, en carpetas, con campos personalizados.
+• Una papelera que guarda lo que borras, y cada versión anterior de un inicio de sesión.
+• Se bloquea solo cuando te alejas.
+
+Hecho por Keyrook, el creador de Keyrook Authenticator.

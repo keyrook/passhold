@@ -1,0 +1,43 @@
+Ang Passhold ay tagapamahala ng password na libre magpakailanman: pinupunan nito ang iyong mga login, iniingatan ang iyong mga passkey, at gumagawa ng malalakas na password. Naka-encrypt ang iyong vault sa iyong computer at naka-sync sa bawat computer gamit ang Keyrook account. Open source ito, kaya kahit sino ay maaaring tingnan kung paano ito gumagana.
+
+AUTOFILL SA BAWAT WEBSITE
+• Isang click sa field ng sign-in, at napupunan na ang tamang account para sa site na iyon.
+• Nag-aalok na i-save ang bagong login kapag nag-sign in ka, at i-update ang password na binago mo.
+• Napupunan ang card at address sa checkout, dito lang sa pinili mo.
+• Nagsa-sign in ka gamit ang passkey sa mga site na sumusuporta nito.
+• Gumagana sa mga form sa loob ng frame, gaya ng maraming sign-in ng bangko at tindahan.
+• May keyboard shortcut na nagbubukas ng iyong vault anumang oras.
+
+MALAKAS AT NATATANGI
+• Password generator: malakas at natatanging password para sa bawat account.
+• Piliin ang haba at mga karakter, at iwasan ang magkamukhang karakter, gaya ng 0 at O.
+• Security checkup: nakikita ang mahina at paulit-ulit na password, at kung alin ang dapat ayusin muna.
+
+SYNC SA BAWAT COMPUTER
+• Isang Keyrook account, may sarili mong password o gamit ang Google o GitHub.
+• I-unlock gamit ang Touch ID, Windows Hello, PIN, o security key.
+• Mga naka-encrypt na backup na ikaw mismo ang nag-iimbak.
+
+MADALI PUMASOK, MADALI UMALIS
+• Mag-import ng iyong mga login gamit ang CSV file, mula sa browser o karamihan sa ibang manager.
+• I-export ang mga ito anumang oras, bilang CSV file o naka-encrypt na backup. Nananatiling sa iyo ang iyong data.
+
+PRIBADO MULA SA DISENYO
+• Zero-knowledge: naka-encrypt ang lahat gamit ang AES-256-GCM sa iyong computer bago ito umalis. Iniimbak ng Keyrook ang isini-sync mo, pero hindi ito mababasa.
+• Ang susi na nagbubukas ng iyong vault ay hindi kailanman napupunta sa Keyrook.
+• Walang ad, walang tracker, walang analytics.
+• Nasa loob ng app ang mga icon ng site, kaya walang server na nakaaalam kung saang site ka may account.
+• Isang login lang ang iaalok sa sarili nitong site, kaya walang nakukuha ang pekeng pahina.
+• Hindi pinupunan ang mga field na hindi mo nakikita, at sa mga secure na pahina lang pinupunan ang card.
+• Ang kinopyang password ay binubura sa clipboard pagkaraan ng maikling sandali.
+• Open source: basahin ang code sa GitHub.
+
+LIBRE MAGPAKAILANMAN
+• Lahat ng nasa itaas ay libre, habambuhay, para sa lahat. Dagdag na feature lang ang hatid ng bayad na plano, at walang anuman dito ang magiging bayad kailanman.
+
+NASA IYONG VAULT DIN
+• Mga login, passkey, card, address at note, sa mga folder, na may sariling field.
+• Basurahang nagtatago ng binura mo, at bawat naunang bersyon ng login.
+• Nagla-lock mismo kapag lumayo ka.
+
+Ginawa ng Keyrook ang Passhold, ang gumawa ng Keyrook Authenticator.

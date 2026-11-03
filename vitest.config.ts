@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       '@passhold/core': resolve(import.meta.dirname, 'packages/core/src/index.ts'),
       '@keyrook/brand': resolve(import.meta.dirname, 'vendor/keyrook-brand/src/index.ts'),
+      '@keyrook/account': resolve(import.meta.dirname, 'vendor/keyrook-account/src/index.ts'),
     },
   },
   test: {

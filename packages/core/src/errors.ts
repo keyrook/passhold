@@ -13,9 +13,19 @@ export type ErrorCode =
   | 'importEmpty'
   | 'importTooLarge'
   | 'importUnknownFormat'
+  | 'importEncrypted'
   | 'backupInvalid'
   | 'backupWrongPassword'
-  | 'kdfUnsupported';
+  | 'pinInvalid'
+  | 'wrongPin'
+  | 'deviceKeyWrong'
+  | 'accountKdfRefused'
+  | 'accountKeyWrong'
+  | 'accountKitWrong'
+  | 'pairingRefused'
+  | 'passkeyWrong'
+  | 'kdfUnsupported'
+  | 'familyOrganiserOnly';
 
 export class PassholdError extends Error {
   override readonly name = 'PassholdError';

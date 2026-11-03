@@ -1,0 +1,5 @@
+{
+  "appName": "Менеджер паролів - Passhold",
+  "appDescription": "Менеджер паролів, безкоштовний назавжди: autofill, passkeys, генератор. End-to-end шифрування, відкритий код, sync між комп’ютерами.",
+  "commandOpen": "Відкрити Passhold"
+}

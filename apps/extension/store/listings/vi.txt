@@ -1,0 +1,43 @@
+Passhold là trình quản lý mật khẩu miễn phí mãi mãi, tự điền đăng nhập, giữ passkey và tạo mật khẩu mạnh. Kho của bạn được mã hoá đầu cuối ngay trên máy tính và đồng bộ giữa các máy tính qua tài khoản Keyrook. Mã nguồn mở, nên ai cũng có thể kiểm tra cách nó hoạt động.
+
+TỰ ĐIỀN TRÊN MỌI TRANG
+• Một cú bấm trong ô đăng nhập sẽ điền đúng tài khoản của trang đó.
+• Hỏi lưu đăng nhập mới khi bạn đăng nhập, và cập nhật mật khẩu bạn vừa đổi.
+• Điền thẻ và địa chỉ khi thanh toán, chỉ ở nơi bạn chọn.
+• Đăng nhập bằng passkey trên các trang có hỗ trợ.
+• Hoạt động trong biểu mẫu nằm trong khung, như nhiều trang đăng nhập ngân hàng và cửa hàng.
+• Phím tắt mở kho của bạn bất cứ lúc nào.
+
+MẠNH VÀ DUY NHẤT
+• Công cụ tạo mật khẩu: một mật khẩu mạnh, riêng cho từng tài khoản.
+• Chọn độ dài và ký tự, và bỏ các ký tự dễ nhầm như 0 và O.
+• Kiểm tra bảo mật: tìm mật khẩu yếu và mật khẩu bị dùng lại, và cho biết nên đổi cái nào trước.
+
+ĐỒNG BỘ GIỮA CÁC MÁY TÍNH
+• Một tài khoản Keyrook, với mật khẩu riêng hoặc đăng nhập bằng Google, GitHub.
+• Mở khoá bằng Touch ID, Windows Hello, mã PIN hoặc khoá bảo mật.
+• Bản sao lưu mã hoá do chính bạn giữ.
+
+DỄ CHUYỂN VÀO, DỄ RỜI ĐI
+• Nhập đăng nhập bằng tệp CSV, từ trình duyệt hoặc hầu hết trình quản lý khác.
+• Xuất chúng bất cứ lúc nào, dưới dạng tệp CSV hoặc bản sao lưu mã hoá. Dữ liệu vẫn là của bạn.
+
+RIÊNG TƯ TỪ THIẾT KẾ
+• Zero-knowledge: mọi thứ được mã hoá bằng AES-256-GCM trên máy tính trước khi rời khỏi máy. Keyrook lưu những gì bạn đồng bộ nhưng không đọc được.
+• Khoá mở kho của bạn không bao giờ đến được Keyrook.
+• Không quảng cáo, không theo dõi, không phân tích.
+• Biểu tượng các trang đã có sẵn trong ứng dụng, nên không máy chủ nào biết bạn có tài khoản ở đâu.
+• Một đăng nhập chỉ được đề xuất trên đúng trang của nó, nên trang giả mạo không nhận được gì.
+• Ô bạn không nhìn thấy sẽ không bao giờ được điền, và thẻ chỉ được điền trên trang an toàn.
+• Mật khẩu vừa sao chép được xoá khỏi bộ nhớ tạm sau một lúc.
+• Mã nguồn mở: đọc mã trên GitHub.
+
+MIỄN PHÍ MÃI MÃI
+• Mọi thứ ở trên đều miễn phí, mãi mãi, cho tất cả mọi người. Các gói trả phí chỉ thêm tính năng, và không có gì ở đây sẽ bị chuyển sang trả phí.
+
+CÒN TRONG KHO CỦA BẠN
+• Đăng nhập, thẻ, địa chỉ và ghi chú bảo mật, xếp theo thư mục, có trường tuỳ chỉnh.
+• Thùng rác giữ những gì bạn xoá, và mọi phiên bản cũ của một đăng nhập.
+• Tự khoá khi bạn rời máy.
+
+Passhold là sản phẩm của Keyrook, cùng nhà với Keyrook Authenticator.

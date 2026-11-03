@@ -6,8 +6,14 @@
     "emitDeclarationOnly": true,
     "declaration": true,
     "outDir": "./.tsbuild-node",
+    // The repository's root: the end-to-end tests check passkeys with the same relying party the core's tests use.
+    "rootDir": "../..",
     "types": ["node", "chrome"],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@keyrook/account": ["../../vendor/keyrook-account/src/index.ts"]
+    }
   },
-  "include": ["vite.config.ts", "vite.content.config.ts", "playwright.config.ts", "e2e/**/*.ts", "review/**/*.ts"]
+  "include": ["vite.config.ts", "vite.content.config.ts", "playwright.config.ts", "e2e/**/*.ts", "review/**/*.ts", "scripts/**/*.ts", "test/locale-rules.ts", "src/i18n/format.ts", "src/i18n/locales/en.ts", "../../packages/core/test/support/*.ts", "../../vendor/keyrook-account/src/**/*.ts", "../../vendor/keyrook-brand/src/tokens.ts", "../../vendor/keyrook-account-kit/*.d.mts"]
 }

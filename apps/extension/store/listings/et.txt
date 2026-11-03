@@ -1,0 +1,43 @@
+Passhold on paroolihaldur, mis on igavesti tasuta, täidab automaatselt sinu sisselogimisandmed, hoiab alles sinu pääsuvõtmed ja genereerib tugevaid paroole. Sinu hoidla on krüpteeritud otsast otsani sinu arvutis ning see sünkroonitakse sinu arvutite vahel Keyrook-konto kaudu. See on avatud lähtekoodiga, nii et igaüks saab kontrollida, kuidas see töötab.
+
+AUTOMAATNE TÄITMINE IGAL LEHEL
+• Üks klõps sisselogimisväljal täidab selle saidi õige konto.
+• Salvestab uued sisselogimised, kui sisse logid, ja uuendab muudetud.
+• Täidab kaardid ja aadressid kassas, ainult seal, kus sina valid.
+• Logib sind sisse pääsuvõtmega saitidel, mis neid pakuvad.
+• Töötab raamides olevates vormides, nagu paljude pankade ja poodide sisselogimised on ehitatud.
+• Klahvikombinatsioon avab sinu hoidla igal ajal.
+
+TUGEV JA AINULAADNE
+• Parooligeneraator: tugev ja ainulaadne parool igale kontole.
+• Vali pikkus ja märgid ning jäta välja segiajamini sarnased märgid, nagu 0 ja O.
+• Turvakontroll: leiab nõrgad ja mitu korda kasutatud paroolid ning näitab, mida parandada kõigepealt.
+
+SÜNKRONISEERIMINE ARVUTITE VAHEL
+• Üks Keyrook-konto, oma parooli või Google'i või GitHubi kaudu.
+• Ava lukk Touch ID-ga, Windows Helloga, PIN-koodiga või turvavõtmega.
+• Krüpteeritud varukoopiad, mida hoiad ise.
+
+KERGE SISSE, KERGE VÄLJA
+• Impordi oma sisselogimised CSV-failiga brauserist või enamikust teistest halduritest.
+• Ekspordi need igal ajal CSV-failina või krüpteeritud varukoopiana. Sinu andmed jäävad sinu omaks.
+
+PRIVAATNE ALATES DISAINIST
+• Null-teadmine: kõik krüpteeritakse sinu arvutis AES-256-GCM-ga, enne kui see sealt lahkub. Keyrook hoiab seda, mida sünkroonid, ega suuda seda lugeda.
+• Võti, mis avab sinu hoidla, ei jõua kunagi Keyrookini.
+• Ei reklaame, jälgijaid ega analüütikat.
+• Saitide ikoonid on sisse ehitatud, nii et ükski server ei tea, kus sul kontod on.
+• Konto pakutakse ainult omal saidil, nii et võltslehekülg ei saa midagi.
+• Nähtamatuid välju ei täideta kunagi ning kaarte täidetakse ainult turvalistel lehtedel.
+• Kopeeritud parool eemaldatakse lõikelaualt mõne aja pärast.
+• Avatud lähtekood: loe koodi GitHubist.
+
+IGAVESTI TASUTA
+• Kõik ülalnimetatu on tasuta, igavesti ja kõigile. Tasulised paketid lisavad ainult lisafunktsioone ja midagi sellest ei muutu kunagi tasuliseks.
+
+KA SINU HOIDLAS
+• Maksekaardid, aadressid ja turvalised märkmed kaustades, kohandatud väljadega.
+• Prügikast, mis hoiab alles kustutatu, ja iga sisselogimise varasemad versioonid.
+• Lukustub ise, kui sa eemaldud.
+
+Tegi Keyrook, Keyrook Authenticatori looja.

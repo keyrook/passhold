@@ -7,6 +7,7 @@
  * and collect whatever a password manager pours into the form.
  */
 import type { FieldKind } from '../lib/messaging.js';
+import { roleOf } from './roles.js';
 
 const TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', '']);
 /** Fields that look like a username but are a search box, a code or a captcha. */
@@ -24,8 +25,8 @@ export function isVisible(element: HTMLElement): boolean {
   return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0.1;
 }
 
-function usable(input: HTMLInputElement): boolean {
-  return !input.disabled && !input.readOnly && isVisible(input);
+export function usable(input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): boolean {
+  return !input.disabled && !(input instanceof HTMLSelectElement ? false : input.readOnly) && isVisible(input);
 }
 
 export function isPasswordField(element: unknown): element is HTMLInputElement {
@@ -42,8 +43,13 @@ export function isUsernameCandidate(element: unknown): element is HTMLInputEleme
   return true;
 }
 
-function passwordsIn(scope: ParentNode): HTMLInputElement[] {
-  return [...scope.querySelectorAll('input')].filter(isPasswordField).filter(usable);
+/**
+ * Password fields that hold a password. A checkout that hides the card's
+ * security code as a password is not a sign-in: its code is never offered
+ * a login, nor saved as one.
+ */
+export function passwordsIn(scope: ParentNode): HTMLInputElement[] {
+  return [...scope.querySelectorAll('input')].filter(isPasswordField).filter(usable).filter((input) => roleOf(input) !== 'cc-csc');
 }
 
 /**
@@ -76,9 +82,10 @@ export function loginFieldsIn(scope: ParentNode): LoginFields {
 }
 
 /** What kind of sign-in field this is, or null when Passhold should leave it alone. */
-export function fieldKind(field: HTMLInputElement): FieldKind | null {
+export function fieldKind(field: HTMLInputElement): Extract<FieldKind, 'login' | 'new'> | null {
   if (!usable(field)) return null;
   if (field.type === 'password') {
+    if (roleOf(field) === 'cc-csc') return null;
     if (field.autocomplete.includes('new-password')) return 'new';
     if (field.autocomplete.includes('current-password')) return 'login';
     const { passwords } = loginFieldsIn(scopeOf(field));

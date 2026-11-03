@@ -26,6 +26,81 @@ test('fills from the button in the field', async ({ context, extensionId }) => {
   await expect.poll(() => page.frames().some((frame) => frame.url().includes('menu.html'))).toBe(false);
 });
 
+test('takes no click in the list until it has been seen, where it is, for a moment', async ({ context, extensionId }) => {
+  const popup = await setUp(context, extensionId);
+  await addLogin(popup, { ...ALICE, url: 'https://login.example.test/tall' });
+  const page = await context.newPage();
+  await page.goto('https://login.example.test/tall');
+  const email = page.locator('#email');
+  const rowAt = async (menu: import('@playwright/test').Frame) => {
+    const box = (await menu.getByRole('button', { name: /Example/ }).boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+
+  // A double click the page asked for: the first opens the list under the
+  // field, the second lands on its first row the moment the row is there.
+  await email.click();
+  let menu = await frameOf(page, 'menu.html');
+  await menu.getByRole('button', { name: /Example/ }).waitFor();
+  let row = await rowAt(menu);
+  await page.mouse.click(row.x, row.y);
+  await page.waitForTimeout(300);
+  await expect(email).toHaveValue('');
+  // Seen a moment, the same click is the person's.
+  await page.waitForTimeout(400);
+  await page.mouse.click(row.x, row.y);
+  await expect(email).toHaveValue(ALICE.username);
+
+  // The page scrolls the list under a pointer that stayed where it was: the click waits again.
+  await email.fill('');
+  await page.locator('#password').fill('');
+  await pressFieldButton(page.mainFrame(), '#email');
+  menu = await frameOf(page, 'menu.html');
+  await expect(menu.getByRole('button', { name: /Example/ })).toBeEnabled();
+  await page.evaluate(() => scrollBy(0, 30));
+  await page.waitForTimeout(100);
+  row = await rowAt(menu);
+  await page.mouse.click(row.x, row.y);
+  await page.waitForTimeout(300);
+  await expect(email).toHaveValue('');
+  await page.waitForTimeout(400);
+  await page.mouse.click(row.x, row.y);
+  await expect(email).toHaveValue(ALICE.username);
+});
+
+test('draws nothing in a page until a sign-in field needs it, and nothing ever in a bot check', async ({ context, extensionId }) => {
+  const popup = await setUp(context, extensionId);
+  await addLogin(popup, ALICE);
+  const overlays = (frame: import('@playwright/test').Frame) => frame.evaluate(() => document.querySelectorAll('passhold-overlay').length);
+  const page = await context.newPage();
+  await page.goto('https://login.example.test/');
+  await page.waitForTimeout(500);
+  expect(await overlays(page.mainFrame())).toBe(0);
+  await page.locator('#email').click();
+  await expect.poll(() => overlays(page.mainFrame())).toBeGreaterThan(0);
+
+  // Cloudflare's checks, in their own frame or on the site's /cdn-cgi/: Passhold is not there at all.
+  for (const url of ['https://challenges.cloudflare.com/turnstile', 'https://login.example.test/cdn-cgi/challenge']) {
+    await page.goto(url);
+    await page.locator('#email').click();
+    await page.waitForTimeout(800);
+    expect(await overlays(page.mainFrame()), url).toBe(0);
+    expect(page.frames().some((frame) => frame.url().includes('menu.html')), url).toBe(false);
+    // No bridge answers for passkeys either.
+    const answered = await page.evaluate(
+      () =>
+        new Promise<boolean>((resolve) => {
+          addEventListener('message', (event) => {
+            if ((event.data as { kind?: string })?.kind === 'answers') resolve(true);
+          });
+          postMessage({ source: 'passhold-webauthn', kind: 'canAnswer', id: 'probe' }, location.origin);
+          setTimeout(() => resolve(false), 1000);
+        }),
+    );
+    expect(answered, url).toBe(false);
+  }
+});
+
 test('fills from the popup for the page in the active tab', async ({ context, extensionId }) => {
   const popup = await setUp(context, extensionId);
   await addLogin(popup, ALICE);

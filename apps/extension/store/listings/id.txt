@@ -1,0 +1,43 @@
+Passhold adalah pengelola sandi yang mengisi sandi dan kunci sandi untuk Anda, serta menyimpannya terenkripsi di komputer Anda. Masuk dengan akun Keyrook, dan semuanya mengikuti Anda ke setiap komputer yang Anda pakai. Gratis selamanya dan bersumber terbuka, jadi siapa pun bisa memeriksa cara kerjanya.
+
+ISI OTOMATIS, TANPA MENGETIK
+• Tombol di setiap kolom masuk menampilkan login untuk situs itu. Satu klik untuk mengisinya.
+• Menawarkan untuk menyimpan login saat Anda masuk, dan memperbarui sandi yang Anda ubah.
+• Kunci sandi situs web: simpan di sini dan masuk dengan satu klik.
+• Kartu dan alamat diisi di halaman pembayaran, hanya di tempat yang Anda pilih.
+• Bekerja di formulir dalam frame, seperti banyak halaman masuk bank dan toko daring.
+• Pintasan keyboard membuka brankas Anda kapan saja.
+
+KUAT DAN UNIK
+• Pembuat sandi: sandi yang kuat dan unik untuk setiap akun.
+• Pilih panjang dan karakternya, dan hilangkan karakter yang mirip seperti 0 dan O.
+• Pemeriksaan keamanan: menemukan sandi yang lemah dan yang dipakai ulang, serta menunjukkan mana yang harus diubah lebih dulu.
+
+SINKRON DI SEMUA KOMPUTER
+• Satu akun Keyrook, dengan sandi sendiri atau dengan Google atau GitHub.
+• Buka kunci dengan Touch ID atau Windows Hello, PIN, atau kunci keamanan.
+• Cadangan terenkripsi yang Anda simpan sendiri.
+
+MUDAH MASUK, MUDAH KELUAR
+• Impor login Anda dengan berkas CSV, dari browser atau sebagian besar pengelola lain.
+• Ekspor kapan saja, sebagai berkas CSV atau cadangan terenkripsi. Data Anda tetap milik Anda.
+
+PRIVAT SEJAK DARI RANCANGANNYA
+• Zero-knowledge: semuanya dienkripsi dengan AES-256-GCM di komputer Anda sebelum keluar. Server Keyrook menyimpan yang Anda sinkronkan, tetapi tidak bisa membacanya.
+• Kunci yang membuka brankas Anda tidak pernah sampai ke Keyrook.
+• Tanpa iklan, tanpa pelacak, tanpa analitik.
+• Ikon situs sudah ada di dalam aplikasi, tidak diunduh, jadi tidak ada server yang tahu Anda punya akun di mana.
+• Login hanya ditawarkan di situsnya sendiri, jadi halaman yang mirip tidak mendapat apa-apa.
+• Kolom yang tidak terlihat tidak pernah diisi, dan kartu hanya diisi di halaman aman.
+• Sandi yang disalin dihapus dari papan klip setelah beberapa saat.
+• Sumber terbuka: siapa pun bisa membaca kodenya di GitHub.
+
+GRATIS SELAMANYA
+• Semua yang di atas gratis, selamanya, untuk semua orang. Paket berbayar hanya menambahkan fitur ekstra, dan semua ini tidak akan pernah jadi berbayar.
+
+JUGA DI BRANKAS ANDA
+• Login, kunci sandi, kartu, alamat, dan catatan, dalam folder, dengan kolom Anda sendiri.
+• Sampah menyimpan apa yang Anda hapus, dan setiap sandi sebelumnya dari login.
+• Terkunci sendiri saat Anda meninggalkan komputer.
+
+Passhold dibuat oleh Keyrook, pembuat Keyrook Authenticator.

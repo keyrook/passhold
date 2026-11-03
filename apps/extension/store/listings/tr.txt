@@ -1,0 +1,43 @@
+Passhold, sonsuza dek ücretsiz bir parola yöneticisidir: giriş bilgilerinizi otomatik doldurur, geçiş anahtarlarınızı saklar ve güçlü parolalar üretir. Kasanız bilgisayarınızda uçtan uca şifrelenir ve bir Keyrook hesabıyla kullandığınız tüm bilgisayarlar arasında eşitlenir. Açık kaynaktır; herkes nasıl çalıştığını inceleyebilir.
+
+OTOMATİK DOLDURMA HER SİTEDE
+• Her oturum açma alanındaki bir tıklama, o site için doğru hesabı doldurur.
+• Oturum açtığınızda yeni girişleri kaydeder, değiştirdiklerinizi günceller.
+• Kartları ve adresleri yalnızca siz seçtiğinizde, ödeme sayfasında doldurur.
+• Geçiş anahtarını destekleyen sitelerde geçiş anahtarlarıyla oturum açmanızı sağlar.
+• Çerçevelerin içindeki formlarda da çalışır; birçok banka ve mağaza oturum açma ekranı böyle kurulur.
+• Bir klavye kısayolu kasanızı her zaman açar.
+
+GÜÇLÜ VE BENZERSİZ
+• Parola oluşturucu: her hesap için güçlü ve benzersiz bir parola.
+• Uzunluğunu ve karakterlerini siz seçin; 0 ile O gibi birbirine benzeyenleri dışarıda bırakın.
+• Güvenlik denetimi: zayıf ve birden fazla kullanılan parolaları bulur, önce neyi düzeltmeniz gerektiğini gösterir.
+
+BİLGİSAYARLARINIZDA EŞİTLENİR
+• Kendi parolanızla ya da Google veya GitHub ile bir Keyrook hesabı.
+• Touch ID, Windows Hello, bir PIN ya da bir güvenlik anahtarıyla kilidi açın.
+• Kendi sakladığınız şifreli yedekler.
+
+KOLAYCA GİRİN, KOLAYCA ÇIKIN
+• CSV dosyasıyla girişlerinizi içe aktarın: tarayıcınızdan ya da çoğu başka parola yöneticisinden.
+• Bunları istediğiniz zaman CSV dosyası ya da şifreli yedek olarak dışa aktarın. Verileriniz size ait kalır.
+
+TASARIM GEREĞİ ÖZEL
+• Sıfır bilgi: her şey gönderilmeden önce bilgisayarınızda AES-256-GCM ile şifrelenir. Keyrook eşitlediğiniz şeyleri saklar ama okuyamaz.
+• Kasanızı açan anahtar hiçbir zaman Keyrook’a ulaşmaz.
+• Reklam yok, izleyici yok, analiz yok.
+• Site simgeleri uygulamaya gömülüdür; hiçbir sunucu hesaplarınızın nerede olduğunu öğrenemez.
+• Bir giriş yalnızca kendi sitesinde önerilir; sahte bir sayfa hiçbir şey alamaz.
+• Görmediğiniz alanlar asla doldurulmaz; kartlar yalnızca güvenli sayfalarda doldurulur.
+• Kopyalanan bir parola kısa bir süre sonra panodan silinir.
+• Açık kaynak: kodu GitHub’da okuyun.
+
+HER ZAMAN ÜCRETSİZ
+• Yukarıdakilerin hepsi herkes için, sonsuza dek ücretsizdir. Ücretli planlar yalnızca ek özellikler getirir; buradakilerin hiçbiri asla ücretli olmayacak.
+
+KASANIZDA DA
+• Ödeme kartları, adresler ve güvenli notlar; klasörlerde, kendi alanlarıyla.
+• Sildiklerinizi ve her girişin önceki parolalarını tutan bir çöp kutusu.
+• Uzaklaştığınızda kendini kilitler.
+
+Keyrook tarafından yapılır; Keyrook Authenticator’ın üreticisidir.

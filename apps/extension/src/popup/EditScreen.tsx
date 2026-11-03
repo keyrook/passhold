@@ -1,27 +1,38 @@
 import { useState, type FormEvent } from 'react';
-import type { GeneratorOptions, LoginItem, VaultSettings } from '@passhold/core';
+import type { CustomField, GeneratorOptions, LoginItem, VaultSettings } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import { send } from '../lib/messaging.js';
+import type { FolderEntry } from '../ui/Folders.js';
 import { Generator } from '../ui/Generator.js';
 import { useAction } from '../ui/hooks.js';
 import { BackIcon, KeyIcon } from '../ui/icons.js';
-import { Button, Callout, Field } from '../ui/primitives.js';
+import { Button, Callout, cx, Field } from '../ui/primitives.js';
+import { useChange } from '../ui/place.js';
 import { Strength } from '../ui/Strength.js';
+import { FieldsEditor, FolderField } from './Fields.js';
 import { PasswordInput } from './PasswordInput.js';
 
-const TEXTAREA =
+export const TEXTAREA =
   'w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-brand-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-50';
 
 export function EditScreen({
   item,
   settings,
   defaultUrl,
+  folders,
+  defaultFolder = '',
   onDone,
+  className = 'h-[560px]',
 }: {
   item: LoginItem | null;
   settings: VaultSettings;
   defaultUrl: string | null;
+  /** The folders there are, to choose from. */
+  folders: readonly FolderEntry[];
+  /** A new login's folder: the one the list was showing. */
+  defaultFolder?: string;
   onDone: (id: string | null) => void;
+  className?: string;
 }) {
   const t = useT();
   const [title, setTitle] = useState(item?.title ?? '');
@@ -29,9 +40,12 @@ export function EditScreen({
   const [password, setPassword] = useState(item?.password ?? '');
   const [urls, setUrls] = useState((item?.urls ?? (defaultUrl ? [defaultUrl] : [])).join('\n'));
   const [notes, setNotes] = useState(item?.notes ?? '');
+  const [fields, setFields] = useState<CustomField[]>(item?.fields ?? []);
+  const [folder, setFolder] = useState(item?.folder ?? defaultFolder);
   const [generating, setGenerating] = useState(false);
   const [generator, setGenerator] = useState<GeneratorOptions>(settings.generator);
   const { busy, error, setError, run } = useAction();
+  const change = useChange();
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -39,23 +53,23 @@ export function EditScreen({
       setError(t('edit.empty'));
       return;
     }
-    const draft = { title, username, password, urls: urls.split('\n'), notes, favorite: item?.favorite ?? false };
+    const draft = { title, username, password, urls: urls.split('\n'), notes, favorite: item?.favorite ?? false, folder, fields };
     void run(async () => {
       if (generator !== settings.generator) {
         await send({ type: 'vault/mutate', mutation: { op: 'settings/update', patch: { generator } } });
       }
       if (item) {
-        await send({ type: 'vault/mutate', mutation: { op: 'login/update', id: item.id, draft } });
+        await change({ op: 'login/update', id: item.id, draft });
         onDone(item.id);
       } else {
-        await send({ type: 'vault/mutate', mutation: { op: 'login/add', draft } });
+        await change({ op: 'login/add', draft });
         onDone(null);
       }
     });
   };
 
   return (
-    <form onSubmit={submit} className="flex h-[560px] flex-col">
+    <form onSubmit={submit} className={cx('flex flex-col', className)}>
       <header className="flex items-center gap-1 border-b border-neutral-200 px-2 py-2 dark:border-neutral-800">
         <Button size="sm" variant="ghost" aria-label={t('common.back')} title={t('common.back')} onClick={() => onDone(item?.id ?? null)}>
           <BackIcon className="kr-icon-flip h-[18px] w-[18px]" />
@@ -101,6 +115,8 @@ export function EditScreen({
           </label>
           <textarea id="notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} className={TEXTAREA} />
         </div>
+        <FieldsEditor fields={fields} onChange={setFields} />
+        <FolderField value={folder} onChange={setFolder} folders={folders} />
         {error && <Callout tone="danger">{error}</Callout>}
       </div>
 

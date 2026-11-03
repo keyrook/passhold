@@ -13,6 +13,7 @@
     "paths": {
       "@passhold/core": ["../../packages/core/src/index.ts"],
       "@keyrook/brand": ["../../vendor/keyrook-brand/src/index.ts"],
+      "@keyrook/account": ["../../vendor/keyrook-account/src/index.ts"],
       "~/*": ["./src/*"]
     },
     "allowImportingTsExtensions": true

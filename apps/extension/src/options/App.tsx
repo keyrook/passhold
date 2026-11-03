@@ -1,577 +1,293 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import {
-  AUTO_LOCK_CHOICES,
-  CLIPBOARD_CHOICES,
-  importCsv,
-  MAX_BACKUP_BYTES,
-  MIN_MASTER_PASSWORD,
-  parseBackup,
-  PassholdError,
-  type ImportResult,
-  type VaultData,
-  type VaultFile,
-  type VaultSettings,
-} from '@passhold/core';
-import { describeError } from '../i18n/errors.js';
-import { LOCALE_NAMES, LOCALES } from '../i18n/locales.js';
+import { useEffect, useMemo, useState, type ComponentType, type SVGProps } from 'react';
+import { checkup } from '@passhold/core';
 import { useT } from '../i18n/react.js';
-import { currentPreference, setLanguage, type LanguagePreference } from '../i18n/runtime.js';
-import { send, type RestoreResult } from '../lib/messaging.js';
+import type { MessageKey } from '../i18n/locales/en.js';
 import { APP_NAME } from '../lib/name.js';
-import { useAction, useVault } from '../ui/hooks.js';
-import { PassholdMark } from '../ui/icons.js';
-import { Button, Callout, Select, Toggle } from '../ui/primitives.js';
-import { Strength } from '../ui/Strength.js';
-import { currentTheme, setTheme, type ThemePreference } from '../ui/theme.js';
-import { PasswordInput } from '../popup/PasswordInput.js';
+import { send } from '../lib/messaging.js';
+import { useVault } from '../ui/hooks.js';
+import { CloudIcon, CodeIcon, KeyIcon, LockIcon, PassholdMark, SettingsIcon, ShieldIcon, UsersIcon } from '../ui/icons.js';
+import { Callout, cx } from '../ui/primitives.js';
+import { RecoveryKeyScreen, type RecoveryKind } from '../popup/RecoveryKeyScreen.js';
+import { UnlockScreen } from '../popup/UnlockScreen.js';
+import { deviceAvailable } from '../ui/device.js';
+import { setPasswordName } from '../ui/passwordName.js';
+import { AccountPanel } from './AccountPanel.js';
+import { BackupPanel, type BackupJob } from './BackupPanel.js';
+import { FamilyPanel } from './FamilyPanel.js';
+import { JoinAccount } from './JoinAccount.js';
+import { GeneralPanel, RemoveVault } from './GeneralPanel.js';
+import { Gate } from './Gate.js';
+import { PinOffer } from './PinOffer.js';
+import { NewKitScreens } from './NewKit.js';
+import { StartedOverScreens, type StartedOver } from './StartOver.js';
+import { PasswordsPanel, type PasswordsView } from './PasswordsPanel.js';
+import { SecurityPanel } from './SecurityPanel.js';
 
-function Section({ id, title, children, tone }: { id?: string; title: string; children: ReactNode; tone?: 'danger' }) {
-  return (
-    <section
-      id={id}
-      className={
-        tone === 'danger'
-          ? 'flex flex-col gap-3 rounded-2xl border border-red-200 bg-white p-5 dark:border-red-500/30 dark:bg-neutral-900'
-          : 'flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900'
-      }
-    >
-      <h2 className="text-[15px] font-semibold">{title}</h2>
-      {children}
-    </section>
-  );
+const SOURCE = 'https://github.com/keyrook/passhold';
+
+type Tab = 'passwords' | 'account' | 'family' | 'security' | 'general';
+
+/**
+ * Four tabs: the logins themselves (with what needs attention and the trash),
+ * the account they sync with (with backups beside it), how Passhold opens,
+ * and how it behaves; and a fifth once the account is in a family, for who
+ * is in it and what it shares.
+ */
+const TABS: { id: Tab; label: MessageKey; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
+  { id: 'passwords', label: 'nav.passwords', Icon: KeyIcon },
+  { id: 'account', label: 'nav.accountSync', Icon: CloudIcon },
+  { id: 'family', label: 'nav.family', Icon: UsersIcon },
+  { id: 'security', label: 'nav.security', Icon: LockIcon },
+  { id: 'general', label: 'nav.general', Icon: SettingsIcon },
+];
+
+/**
+ * Where the address says to start. Every tab is worth a link of its own, and
+ * the addresses of the tabs there were before still lead to what they held:
+ * #checkup and #trash to Passwords, #backup and its jobs to the account.
+ */
+function fromHash(): { tab: Tab; job: BackupJob | null; view: PasswordsView } {
+  const hash = location.hash.slice(1);
+  const at = (tab: Tab, job: BackupJob | null = null, view: PasswordsView = 'all') => ({ tab, job, view });
+  if (hash === 'recovery') return at('security');
+  if (hash === 'restore' || hash === 'import' || hash === 'export') return at('account', hash);
+  if (hash === 'checkup') return at('passwords', null, 'attention');
+  if (hash === 'trash') return at('passwords', null, 'trash');
+  if (hash === 'security' || hash === 'general' || hash === 'account' || hash === 'passwords' || hash === 'family') return at(hash);
+  // Back from Google or GitHub, or signing in on a computer with no vault yet;
+  // or sent from the popup to type the account's recovery key.
+  if (hash === 'provider' || hash === 'signin' || hash === 'backup' || hash === 'kit') return at('account');
+  return at('passwords');
 }
 
-function Muted({ children }: { children: ReactNode }) {
-  return <p className="text-[13px] leading-relaxed text-neutral-600 dark:text-neutral-400">{children}</p>;
-}
-
-/** Hand the person a file, as a download from this page. */
-function download(name: string, text: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
-const today = () => new Date().toISOString().slice(0, 10);
+const START = fromHash();
+/** Sent here to see the recovery key again — to print it, say: asked for at once. */
+const SHOW_RECOVERY = location.hash === '#recovery';
 
 export function App() {
   const t = useT();
   const { status } = useVault();
+  const [tab, setTab] = useState<Tab>(START.tab);
+  const [job, setJob] = useState<BackupJob | null>(START.job);
+  const [view, setView] = useState<PasswordsView>(START.view);
+  // Bumped on every click in the sidebar, so choosing the tab already open
+  // goes back to its first page.
+  const [visit, setVisit] = useState(0);
   // Restoring into an empty browser swaps this page for the full settings, so
-  // what it did is said here, above both.
+  // what it did is said above both.
   const [restored, setRestored] = useState<number | null>(null);
-  useEffect(() => {
-    if (status?.state === 'uninitialized') setRestored(null);
-  }, [status?.state]);
+  // A recovery key just drawn — at setup here, or by a change in Security — shown once, before anything else.
+  const [shown, setShown] = useState<{ key: string; kind: RecoveryKind } | null>(null);
+  // A vault just made here to open with a password or code: a PIN offered before anything else.
+  const [pinOffer, setPinOffer] = useState<string | null>(null);
+  const setRecoveryKey = (key: string) => setShown({ key, kind: 'vault' });
+  // A start over just asked for: its recovery key and its day, before anything else.
+  const [startedOver, setStartedOver] = useState<StartedOver | null>(null);
+  // A new recovery key for the account, drawn and not yet set: shown, typed back, then set with the password.
+  const [newKit, setNewKit] = useState<string | null>(null);
+  // Asked once, before anything is drawn, so Security never shows one answer and then another.
+  const [canUseDevice, setCanUseDevice] = useState<boolean | null>(null);
+  useEffect(() => void deviceAvailable().then(setCanUseDevice), []);
+  const data = status?.state === 'unlocked' ? status.data : null;
+  const linked = status?.state === 'unlocked' && status.account !== null;
+  const attention = useMemo(() => (data ? checkup(data, Date.now(), linked).issues > 0 : false), [data, linked]);
 
   useEffect(() => {
     document.title = `${t('settings.title')} · ${APP_NAME}`;
   }, [t]);
 
-  // Arriving at #import or #restore from the popup: scroll there once the page is drawn.
   useEffect(() => {
-    if (status && location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
-  }, [status]);
+    if (status?.state === 'uninitialized') setRestored(null);
+  }, [status?.state]);
 
-  if (!status) return <div className="min-h-screen" />;
+  const go = (next: Tab, nextJob: BackupJob | null = null, nextView: PasswordsView = 'all') => {
+    setTab(next);
+    setJob(nextJob);
+    setView(nextView);
+    setVisit((count) => count + 1);
+    history.replaceState(null, '', `#${nextJob ?? next}`);
+  };
 
-  return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-5 px-5 py-10">
-      <header className="flex items-center gap-3">
-        <PassholdMark size={40} />
-        <div className="flex flex-col">
-          <h1 className="text-xl font-semibold">{t('settings.title')}</h1>
-          <span className="text-[13px] text-neutral-600 dark:text-neutral-400">
-            {t('settings.about', { version: chrome.runtime.getManifest().version })}
-          </span>
+  // Until the worker answers, a blank page: nothing drawn that the answer could swap.
+  if (!status || canUseDevice === null) return <div className="min-h-screen" />;
+  if (status.state !== 'uninitialized') setPasswordName(status.passwordName);
+
+  if ((shown || startedOver || newKit) && status.state === 'unlocked') {
+    return (
+      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-10 print:block print:max-w-none print:p-0">
+        <div className="rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/60 print:border-0">
+          {shown ? (
+            <RecoveryKeyScreen recoveryKey={shown.key} kind={shown.kind} onDone={() => setShown(null)} onPrint={() => window.print()} framed />
+          ) : newKit ? (
+            <NewKitScreens recoveryKey={newKit} onDone={() => setNewKit(null)} onPrint={() => window.print()} />
+          ) : (
+            <StartedOverScreens done={startedOver!} onDone={() => setStartedOver(null)} onPrint={() => window.print()} />
+          )}
         </div>
-      </header>
-
-      {status.state === 'locked' && <Callout tone="info">{t('settings.locked')}</Callout>}
-      {restored !== null && <Callout tone="info">{t('settings.restoreNew', { count: restored })}</Callout>}
-
-      {status.state === 'uninitialized' && <Restore merge={false} onNew={setRestored} />}
-
-      {status.state === 'unlocked' ? <General settings={status.data.settings} /> : <Appearance />}
-
-      {status.state === 'unlocked' && (
-        <>
-          <ChangePassword />
-          <Backup data={status.data} />
-          <Restore merge onNew={setRestored} />
-          <Import data={status.data} />
-          <Export />
-          <NeverSave data={status.data} />
-          <Trash data={status.data} />
-        </>
-      )}
-
-      {status.state !== 'uninitialized' && <RemoveVault />}
-    </main>
-  );
-}
-
-function Appearance() {
-  const t = useT();
-  const [language, setLanguageChoice] = useState<LanguagePreference>(currentPreference());
-  const [theme, setThemeChoice] = useState<ThemePreference>(currentTheme());
-  return (
-    <>
-      <Select<LanguagePreference>
-        label={t('settings.language')}
-        value={language}
-        options={[{ value: 'auto', label: t('settings.language.auto') }, ...LOCALES.map((code) => ({ value: code, label: LOCALE_NAMES[code] }))]}
-        onChange={(next) => {
-          setLanguageChoice(next);
-          void setLanguage(next);
-        }}
-      />
-      <Select<ThemePreference>
-        label={t('settings.theme')}
-        value={theme}
-        options={[
-          { value: 'system', label: t('settings.theme.system') },
-          { value: 'light', label: t('settings.theme.light') },
-          { value: 'dark', label: t('settings.theme.dark') },
-        ]}
-        onChange={(next) => {
-          setThemeChoice(next);
-          void setTheme(next);
-        }}
-      />
-    </>
-  );
-}
-
-function General({ settings }: { settings: VaultSettings }) {
-  const t = useT();
-  const { error, run } = useAction();
-  const update = (patch: Partial<VaultSettings>) =>
-    void run(() => send({ type: 'vault/mutate', mutation: { op: 'settings/update', patch } }));
-
-  const lockLabel = (minutes: number) =>
-    minutes === 0
-      ? t('settings.autoLock.never')
-      : minutes >= 60
-        ? t('settings.autoLock.hours', { count: minutes / 60 })
-        : t('settings.autoLock.minutes', { count: minutes });
-  const clipboardLabel = (seconds: number) =>
-    seconds === 0
-      ? t('settings.clipboard.never')
-      : seconds >= 60
-        ? t('settings.clipboard.minutes', { count: seconds / 60 })
-        : t('settings.clipboard.seconds', { count: seconds });
-
-  return (
-    <Section title={t('settings.general')}>
-      <div className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
-        <Select<number>
-          label={t('settings.autoLock')}
-          value={settings.autoLockMinutes}
-          options={AUTO_LOCK_CHOICES.map((value) => ({ value, label: lockLabel(value) }))}
-          onChange={(autoLockMinutes) => update({ autoLockMinutes })}
-        />
-        <Toggle label={t('settings.lockWithSystem')} checked={settings.lockWithSystem} onChange={(lockWithSystem) => update({ lockWithSystem })} />
-        <Select<number>
-          label={t('settings.clipboard')}
-          value={settings.clearClipboardSeconds}
-          options={CLIPBOARD_CHOICES.map((value) => ({ value, label: clipboardLabel(value) }))}
-          onChange={(clearClipboardSeconds) => update({ clearClipboardSeconds })}
-        />
-        <Toggle label={t('settings.inlineButton')} checked={settings.inlineButton} onChange={(inlineButton) => update({ inlineButton })} />
-        <Toggle label={t('settings.offerToSave')} checked={settings.offerToSave} onChange={(offerToSave) => update({ offerToSave })} />
-        <Appearance />
       </div>
-      {error && <Callout tone="danger">{error}</Callout>}
-    </Section>
-  );
-}
+    );
+  }
 
-function ChangePassword() {
-  const t = useT();
-  const [current, setCurrent] = useState('');
-  const [next, setNext] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [done, setDone] = useState(false);
-  const { busy, error, run } = useAction();
-  const long = [...next].length >= MIN_MASTER_PASSWORD;
-  const ready = current && long && next === confirm && !busy;
+  if (pinOffer && status.state === 'unlocked') {
+    return (
+      <Gate intro={false}>
+        <PinOffer secret={pinOffer} onDone={() => setPinOffer(null)} />
+      </Gate>
+    );
+  }
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!ready) return;
-    setDone(false);
-    void run(async () => {
-      await send({ type: 'vault/changePassword', current, next });
-      setCurrent('');
-      setNext('');
-      setConfirm('');
-      setDone(true);
-    });
-  };
+  if (status.state === 'locked') {
+    return (
+      <Gate intro={false} after={<CannotOpen />}>
+        <UnlockScreen secret={status.secret} pin={status.pin} device={status.device} keys={status.keys} compact />
+      </Gate>
+    );
+  }
+
+  if (status.state !== 'unlocked') {
+    // Passhold starts with an account: signed in, or made, then the vault.
+    return (
+      <Gate>
+        <JoinAccount
+          canUseDevice={canUseDevice}
+          onOpenedWith={setPinOffer}
+          // Signed in, the vault opens on the account it came with — chosen
+          // now, while nothing is drawn, so it never shows another tab first.
+          onJoined={() => {
+            setTab('account');
+            setJob(null);
+            history.replaceState(null, '', '#account');
+          }}
+        />
+      </Gate>
+    );
+  }
+
+  const count = [...status.data.items, ...status.data.wallet].filter((item) => item.deletedAt === null).length;
 
   return (
-    <Section title={t('settings.security')}>
-      <Muted>{t('settings.securityBody')}</Muted>
-      <form onSubmit={submit} className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1.5 text-[13px] font-medium">
-          {t('settings.current')}
-          <PasswordInput value={current} onChange={(event) => setCurrent(event.target.value)} />
-        </label>
-        <label className="flex flex-col gap-1.5 text-[13px] font-medium">
-          {t('settings.new')}
-          <PasswordInput value={next} onChange={(event) => setNext(event.target.value)} />
-        </label>
-        <Strength password={next} />
-        {next && !long && <p className="text-[12px] text-red-600 dark:text-red-300">{t('setup.tooShort', { min: MIN_MASTER_PASSWORD })}</p>}
-        <label className="flex flex-col gap-1.5 text-[13px] font-medium">
-          {t('settings.confirm')}
-          <PasswordInput value={confirm} onChange={(event) => setConfirm(event.target.value)} error={Boolean(confirm) && confirm !== next} />
-        </label>
-        {confirm && confirm !== next && <p className="text-[12px] text-red-600 dark:text-red-300">{t('setup.mismatch')}</p>}
-        {error && <Callout tone="danger">{error}</Callout>}
-        {done && <Callout tone="info">{t('settings.changed')}</Callout>}
-        <div>
-          <Button type="submit" variant="primary" disabled={!ready}>
-            {t('settings.change')}
-          </Button>
+    <div className="mx-auto flex min-h-screen w-full max-w-5xl gap-12 px-6 py-10">
+      <aside className="sticky top-10 flex h-[calc(100vh-5rem)] w-56 shrink-0 flex-col">
+        <div className="mb-8 flex items-center gap-3 px-3">
+          <PassholdMark size={32} />
+          <div className="leading-tight">
+            <p className="text-[14.5px] font-semibold tracking-[-0.01em]">{APP_NAME}</p>
+            <p className="text-[12px] text-neutral-600 dark:text-neutral-400">{t('vault.count', { count })}</p>
+          </div>
         </div>
-      </form>
-    </Section>
-  );
-}
 
-function Backup({ data }: { data: VaultData }) {
-  const t = useT();
-  const [password, setPassword] = useState('');
-  const [done, setDone] = useState(false);
-  const { busy, error, run } = useAction();
-  const when = new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium', timeStyle: 'short' });
+        <nav aria-label={t('settings.title')} className="flex flex-col gap-1">
+          {TABS.filter(({ id }) => id !== 'family' || status.data.families.length > 0).map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => go(id)}
+              aria-current={tab === id ? 'page' : undefined}
+              // Said beside the name, not in it: the tab is still "Passwords".
+              aria-description={id === 'passwords' && attention ? t('nav.needsAttention') : undefined}
+              className={cx(
+                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-start text-[14px] font-medium transition-colors',
+                tab === id
+                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300'
+                  : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:hover:text-neutral-200',
+              )}
+            >
+              <Icon className={cx('h-[18px] w-[18px] shrink-0', tab === id ? 'text-brand-600 dark:text-brand-400' : 'text-neutral-400 dark:text-neutral-500')} />
+              {t(label)}
+              {id === 'passwords' && attention && <span className="ms-auto h-2 w-2 rounded-full bg-yellow-500" aria-hidden="true" data-testid="nav-attention" />}
+            </button>
+          ))}
+        </nav>
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!password) return;
-    setDone(false);
-    void run(async () => {
-      const { backup } = await send({ type: 'vault/backup', password });
-      download(`passhold-backup-${today()}.json`, backup, 'application/json');
-      setPassword('');
-      setDone(true);
-    });
-  };
+        {/* What someone deciding whether to trust this wants to know, always in sight. */}
+        <div className="mt-auto flex flex-col gap-1.5 px-3 text-[12px] text-neutral-600 dark:text-neutral-400">
+          <p className="flex items-center gap-1.5 font-medium text-neutral-600 dark:text-neutral-300">
+            <ShieldIcon className="h-4 w-4 text-green-700 dark:text-green-300" />
+            {t('settings.encryptedHere')}
+          </p>
+          <a href={SOURCE} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-neutral-900 hover:underline dark:hover:text-neutral-200">
+            <CodeIcon className="h-4 w-4" />
+            {t('settings.source')}
+          </a>
+          <p>{t('settings.about', { version: chrome.runtime.getManifest().version_name ?? chrome.runtime.getManifest().version })}</p>
+        </div>
+      </aside>
 
-  return (
-    <Section id="backup" title={t('settings.backup')}>
-      <Muted>{t('settings.backupBody')}</Muted>
-      <p className="text-[13px] font-medium" data-testid="last-backup">
-        {data.lastBackupAt ? t('settings.backupLast', { date: when.format(data.lastBackupAt) }) : t('settings.backupNever')}
-      </p>
-      <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <label className="flex flex-1 flex-col gap-1.5 text-[13px] font-medium">
-          {t('settings.current')}
-          <PasswordInput value={password} onChange={(event) => setPassword(event.target.value)} />
-        </label>
-        <Button type="submit" variant="primary" disabled={!password || busy}>
-          {t('settings.backupButton')}
-        </Button>
-      </form>
-      {done && <Callout tone="info">{t('settings.backupDone')}</Callout>}
-      {error && <Callout tone="danger">{error}</Callout>}
-    </Section>
+      <main key={visit} className="min-w-0 max-w-[720px] flex-1 pb-16">
+        {restored !== null && (
+          <div className="mb-6">
+            <Callout tone="info">{t('settings.restoreNew', { count: restored })}</Callout>
+          </div>
+        )}
+        {tab === 'passwords' && (
+          <PasswordsPanel
+            data={status.data}
+            secret={status.secret}
+            device={status.device}
+            linked={linked}
+            view={view}
+            onView={(next) => {
+              setView(next);
+              history.replaceState(null, '', `#${next === 'all' ? 'passwords' : next === 'attention' ? 'checkup' : 'trash'}`);
+            }}
+            onBackUp={() => go('account', 'backup')}
+            onSecurity={() => go('security')}
+          />
+        )}
+        {tab === 'security' && (
+          <SecurityPanel
+            data={status.data}
+            secret={status.secret}
+            device={status.device}
+            keys={status.keys}
+            canUseDevice={canUseDevice}
+            linked={linked}
+            onRecoveryKey={setRecoveryKey}
+            showRecovery={SHOW_RECOVERY && visit === 0}
+          />
+        )}
+        {tab === 'account' && (
+          <>
+            {/* A backup job takes the page; otherwise the account, and the backups below it. */}
+            {!job && (
+              <AccountPanel account={status.account} secret={status.secret} device={status.device} keys={status.keys} onKit={(key, noPassword) => setShown({ key, kind: noPassword ? 'accountNoPassword' : 'account' })}
+                onStartedOver={setStartedOver}
+                onNewKit={async () => setNewKit((await send({ type: 'account/draftKit' })).recoveryKey)}
+              />
+            )}
+            <BackupPanel
+              data={status.data}
+              secret={status.secret}
+              device={status.device}
+              keys={status.keys}
+              job={job}
+              onJob={(next) => {
+                setJob(next);
+                history.replaceState(null, '', `#${next ?? 'account'}`);
+              }}
+              onNew={setRestored}
+            />
+          </>
+        )}
+        {tab === 'family' && <FamilyPanel data={status.data} me={status.account?.accountId ?? null} passwordless={status.account?.passwordless ?? false} />}
+        {tab === 'general' && <GeneralPanel data={status.data} />}
+      </main>
+    </div>
   );
 }
 
 /**
- * Restoring. With no vault here the backup becomes the vault; with one
- * (`merge`), the backup's logins are added to it and nothing is removed.
+ * Under a locked vault, the way out when nothing opens it: removing it from
+ * this browser. Behind a quiet link — beside the unlock button, a red box
+ * reads as the next step, not the last resort.
  */
-function Restore({ merge, onNew }: { merge: boolean; onNew: (count: number) => void }) {
+function CannotOpen() {
   const t = useT();
-  const input = useRef<HTMLInputElement>(null);
-  const [chosen, setChosen] = useState<{ text: string; file: VaultFile } | null>(null);
-  const [password, setPassword] = useState('');
-  const [result, setResult] = useState<RestoreResult | null>(null);
-  const { busy, error, setError, run } = useAction();
-  const made = new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium', timeStyle: 'short' });
-
-  const choose = async (file: File | undefined) => {
-    setChosen(null);
-    setResult(null);
-    setError(null);
-    if (!file) return;
-    try {
-      // Read only to say at once whether it is a backup: the service worker
-      // checks it again, and is the one that opens it.
-      if (file.size > MAX_BACKUP_BYTES) throw new PassholdError('backupInvalid');
-      const text = await file.text();
-      setChosen({ text, file: parseBackup(text) });
-    } catch (caught) {
-      const { key, values } = describeError(caught);
-      setError(t(key, values));
-    } finally {
-      if (input.current) input.current.value = '';
-    }
-  };
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!chosen || !password) return;
-    void run(async () => {
-      const outcome = await send({ type: 'vault/restore', backup: chosen.text, password });
-      setChosen(null);
-      setPassword('');
-      if (outcome.mode === 'new') onNew(outcome.added);
-      else setResult(outcome);
-    });
-  };
-
+  const [open, setOpen] = useState(false);
+  if (open) return <RemoveVault />;
   return (
-    <Section id="restore" title={t('settings.restoreBackup')}>
-      <Muted>{merge ? t('settings.restoreBodyMerge') : t('settings.restoreBodyNew')}</Muted>
-      <input
-        ref={input}
-        type="file"
-        accept=".json,application/json"
-        className="hidden"
-        onChange={(event) => void choose(event.target.files?.[0])}
-        data-testid="restore-file"
-      />
-      <div>
-        <Button onClick={() => input.current?.click()}>{t('settings.restoreChoose')}</Button>
-      </div>
-      {chosen && (
-        <form onSubmit={submit} className="flex flex-col gap-3 rounded-xl bg-neutral-100 p-3 dark:bg-neutral-800">
-          <p className="text-[13px]">{t('settings.restoreMade', { date: made.format(chosen.file.updatedAt) })}</p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="flex flex-1 flex-col gap-1.5 text-[13px] font-medium">
-              {t('settings.restorePassword')}
-              <PasswordInput value={password} onChange={(event) => setPassword(event.target.value)} />
-            </label>
-            <Button type="submit" variant="primary" disabled={!password || busy}>
-              {t('settings.restoreButton')}
-            </Button>
-          </div>
-        </form>
-      )}
-      {result && (
-        <Callout tone="info">
-          {result.added || result.updated
-            ? [
-                result.added ? t('settings.restoreAdded', { count: result.added }) : '',
-                result.updated ? t('settings.restoreUpdated', { count: result.updated }) : '',
-              ]
-                .filter(Boolean)
-                .join(' ')
-            : t('settings.restoreNothing')}
-        </Callout>
-      )}
-      {error && <Callout tone="danger">{error}</Callout>}
-    </Section>
-  );
-}
-
-function Import({ data }: { data: VaultData }) {
-  const t = useT();
-  const input = useRef<HTMLInputElement>(null);
-  const [result, setResult] = useState<ImportResult | null>(null);
-  const [imported, setImported] = useState<number | null>(null);
-  const { busy, error, setError, run } = useAction();
-
-  const choose = async (file: File | undefined) => {
-    setResult(null);
-    setImported(null);
-    setError(null);
-    if (!file) return;
-    try {
-      setResult(importCsv(await file.text(), data.items));
-    } catch (caught) {
-      const { key, values } = describeError(caught);
-      setError(t(key, values));
-    } finally {
-      if (input.current) input.current.value = '';
-    }
-  };
-
-  return (
-    <Section id="import" title={t('settings.import')}>
-      <Muted>{t('settings.importBody')}</Muted>
-      <input ref={input} type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => void choose(event.target.files?.[0])} data-testid="import-file" />
-      <div>
-        <Button onClick={() => input.current?.click()}>{t('settings.importChoose')}</Button>
-      </div>
-      {result && (
-        <div className="flex flex-col gap-2 rounded-xl bg-neutral-100 p-3 text-[13px] dark:bg-neutral-800">
-          {result.drafts.length ? <p>{t('settings.importFound', { count: result.drafts.length })}</p> : <p>{t('settings.importNothing')}</p>}
-          {result.skipped > 0 && <p>{t('settings.importSkipped', { count: result.skipped })}</p>}
-          {result.duplicates > 0 && <p>{t('settings.importDuplicates', { count: result.duplicates })}</p>}
-          {result.drafts.length > 0 && (
-            <div>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await send({ type: 'vault/mutate', mutation: { op: 'login/import', drafts: result.drafts } });
-                    setImported(result.drafts.length);
-                    setResult(null);
-                  })
-                }
-              >
-                {t('settings.importConfirm')}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-      {imported !== null && (
-        <Callout tone="info">
-          {t('settings.importDone', { count: imported })} {t('settings.importDelete')}
-        </Callout>
-      )}
-      {error && <Callout tone="danger">{error}</Callout>}
-    </Section>
-  );
-}
-
-function Export() {
-  const t = useT();
-  const [password, setPassword] = useState('');
-  const [done, setDone] = useState(false);
-  const { busy, error, run } = useAction();
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!password) return;
-    void run(async () => {
-      const { csv } = await send({ type: 'vault/exportCsv', password });
-      download(`passhold-${today()}.csv`, csv, 'text/csv');
-      setPassword('');
-      setDone(true);
-    });
-  };
-
-  return (
-    <Section title={t('settings.export')}>
-      <Muted>{t('settings.exportBody')}</Muted>
-      <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <label className="flex flex-1 flex-col gap-1.5 text-[13px] font-medium">
-          {t('settings.current')}
-          <PasswordInput value={password} onChange={(event) => setPassword(event.target.value)} />
-        </label>
-        <Button type="submit" disabled={!password || busy}>
-          {t('settings.exportButton')}
-        </Button>
-      </form>
-      {done && <Callout tone="info">{t('settings.exportDone')}</Callout>}
-      {error && <Callout tone="danger">{error}</Callout>}
-    </Section>
-  );
-}
-
-function NeverSave({ data }: { data: VaultData }) {
-  const t = useT();
-  const { run } = useAction();
-  return (
-    <Section title={t('settings.neverSave')}>
-      {data.neverSave.length === 0 ? (
-        <Muted>{t('settings.neverSaveEmpty')}</Muted>
-      ) : (
-        <ul className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
-          {data.neverSave.map((site) => (
-            <li key={site} className="flex items-center justify-between py-2 text-sm">
-              {site}
-              <Button size="sm" variant="ghost" onClick={() => void run(() => send({ type: 'vault/mutate', mutation: { op: 'neverSave/remove', site } }))}>
-                {t('settings.remove')}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Section>
-  );
-}
-
-function Trash({ data }: { data: VaultData }) {
-  const t = useT();
-  const { run } = useAction();
-  const trashed = data.items.filter((item) => item.deletedAt !== null);
-  return (
-    <Section title={t('settings.trash')}>
-      {trashed.length === 0 ? (
-        <Muted>{t('settings.trashEmpty')}</Muted>
-      ) : (
-        <>
-          <ul className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
-            {trashed.map((item) => (
-              <li key={item.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                <span className="min-w-0 truncate">
-                  {item.title || item.username}
-                  {item.username && item.title && <span className="text-neutral-600 dark:text-neutral-400"> · {item.username}</span>}
-                </span>
-                <span className="flex shrink-0 gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => void run(() => send({ type: 'vault/mutate', mutation: { op: 'login/restore', id: item.id } }))}>
-                    {t('settings.restore')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-red-600 dark:text-red-300"
-                    onClick={() => void run(() => send({ type: 'vault/mutate', mutation: { op: 'login/purge', id: item.id } }))}
-                  >
-                    {t('settings.deleteForever')}
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-          <div>
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={() => {
-                if (confirm(t('settings.emptyTrashConfirm'))) void run(() => send({ type: 'vault/mutate', mutation: { op: 'trash/empty' } }));
-              }}
-            >
-              {t('settings.emptyTrash')}
-            </Button>
-          </div>
-        </>
-      )}
-    </Section>
-  );
-}
-
-function RemoveVault() {
-  const t = useT();
-  const [typed, setTyped] = useState('');
-  const { busy, error, run } = useAction();
-  const word = t('settings.dangerWord');
-  return (
-    <Section title={t('settings.danger')} tone="danger">
-      <Muted>{t('settings.dangerBody')}</Muted>
-      <label className="flex flex-col gap-1.5 text-[13px] font-medium">
-        {t('settings.dangerType', { word })}
-        <input
-          value={typed}
-          onChange={(event) => setTyped(event.target.value)}
-          className="h-10 rounded-xl border border-neutral-200 bg-white px-3 text-sm dark:border-neutral-800 dark:bg-neutral-900"
-          autoComplete="off"
-        />
-      </label>
-      {error && <Callout tone="danger">{error}</Callout>}
-      <div>
-        <Button
-          variant="danger"
-          disabled={typed.trim().toLocaleLowerCase(t.locale) !== word.toLocaleLowerCase(t.locale) || busy}
-          onClick={() => void run(() => send({ type: 'vault/reset' }))}
-        >
-          {t('settings.dangerButton')}
-        </Button>
-      </div>
-    </Section>
+    <button type="button" onClick={() => setOpen(true)} className="self-center text-[13px] text-neutral-600 hover:text-neutral-900 hover:underline dark:text-neutral-400 dark:hover:text-neutral-200">
+      {t('settings.cannotOpen')}
+    </button>
   );
 }

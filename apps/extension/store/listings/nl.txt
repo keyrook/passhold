@@ -1,0 +1,43 @@
+Passhold is een wachtwoordmanager, voor altijd gratis, die je inloggegevens automatisch invult, je passkeys bewaart en sterke wachtwoorden maakt. Je kluis is op je computer end-to-end versleuteld en wordt via een Keyrook-account over je computers gesynchroniseerd. De broncode is open, zodat iedereen kan nagaan hoe het werkt.
+
+AUTOMATISCH INVULLEN OP ELKE WEBSITE
+• Eén klik in een inlogveld vult het juiste account voor die website in.
+• Slaat nieuwe inloggegevens op wanneer je inlogt, en werkt de gewijzigde bij.
+• Vult kaarten en adressen in bij het afrekenen, alleen waar jij dat kiest.
+• Meldt je aan met passkeys op de websites die ze aanbieden.
+• Werkt in formulieren binnen frames, zoals veel inlogpagina's van banken en winkels zijn opgebouwd.
+• Met een sneltoets open je je kluis op elk moment.
+
+STERK EN UNIEK
+• Wachtwoordgenerator: een sterk, uniek wachtwoord voor elk account.
+• Kies de lengte en de tekens, en laat tekens weg die erop lijken, zoals 0 en O.
+• Veiligheidscheck: vindt zwakke en dubbel gebruikte wachtwoorden, en laat zien wat je het eerst moet oplossen.
+
+SYNCHRONISEREN OVER JE COMPUTERS
+• Eén Keyrook-account, met een eigen wachtwoord of met Google of GitHub.
+• Ontgrendel met Touch ID, Windows Hello, een pincode of een beveiligingssleutel.
+• Versleutelde back-ups die je zelf bewaart.
+
+MAKKELIJK ERIN, MAKKELIJK ER WEER UIT
+• Importeer je inloggegevens met een CSV-bestand, uit je browser of uit de meeste andere managers.
+• Exporteer ze op elk moment, als CSV-bestand of als versleutelde back-up. Je gegevens blijven van jou.
+
+PRIVACY BIJ HET ONTWERP
+• Zero-knowledge: alles wordt op je computer met AES-256-GCM versleuteld voordat het hem verlaat. Keyrook slaat op wat je synchroniseert en kan het niet lezen.
+• De sleutel die je kluis opent, bereikt Keyrook nooit.
+• Geen advertenties, geen trackers, geen analyses.
+• Website-iconen zijn ingebouwd, dus geen enkele server leert waar je accounts hebt.
+• Een account wordt alleen aangeboden op de eigen website, dus een nepsite krijgt niets.
+• Velden die je niet ziet, worden nooit ingevuld, en kaarten worden alleen op beveiligde pagina's ingevuld.
+• Een gekopieerd wachtwoord wordt na korte tijd van het klembord gewist.
+• Open source: lees de code op GitHub.
+
+GRATIS VOOR ALTIJD
+• Alles hierboven is gratis, voor altijd, voor iedereen. Betaalde abonnementen voegen alleen extra’s toe, en niets hiervan wordt ooit betaald.
+
+OOK IN JE KLUIS
+• Betaalkaarten, adressen en beveiligde notities, in mappen, met eigen velden.
+• Een prullenbak die bewaart wat je verwijdert, en elke eerdere versie van een inloggegeven.
+• Vergrendelt zichzelf wanneer je weggaat.
+
+Van Keyrook, de maker van Keyrook Authenticator.

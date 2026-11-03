@@ -1,0 +1,43 @@
+Passhold is a password manager, free forever, that autofills your logins, keeps your passkeys and generates strong passwords. Your vault is end-to-end encrypted on your device and syncs across your computers with a Keyrook account. It is open source, so anyone can check how it works.
+
+AUTOFILL ON EVERY SITE
+• One click in a sign-in field fills the right account for that site.
+• Saves new logins as you sign in, and updates the ones you change.
+• Fills cards and addresses at checkout, only where you choose.
+• Signs you in with passkeys on the sites that offer them.
+• Works in forms inside frames, as many bank and shop sign-ins are built.
+• A keyboard shortcut opens your vault at any time.
+
+STRONG AND UNIQUE
+• Password generator: a strong, unique one for every account.
+• Choose the length and characters, and leave out look-alikes such as 0 and O.
+• Security checkup: finds weak and reused ones, and shows what to fix first.
+
+SYNC ACROSS YOUR COMPUTERS
+• One Keyrook account, with its own password or with Google or GitHub.
+• Unlock with Touch ID, Windows Hello, a PIN or a security key.
+• Encrypted backups you keep yourself.
+
+EASY TO MOVE IN, EASY TO LEAVE
+• Import your logins with a CSV file, from your browser or most other managers.
+• Export them at any time, as a CSV file or an encrypted backup. Your data stays yours.
+
+PRIVATE BY DESIGN
+• Zero-knowledge: everything is encrypted with AES-256-GCM on your device before it leaves. Keyrook stores what you sync and cannot read it.
+• The key that opens your vault never reaches Keyrook.
+• No ads, no trackers, no analytics.
+• Site icons are built in, so no server learns where you have accounts.
+• An account is offered only on its own site, so a look-alike page gets nothing.
+• Fields you cannot see are never filled, and cards are filled only on secure pages.
+• A copied password is cleared from the clipboard after a short while.
+• Open source: read the code on GitHub.
+
+FREE FOREVER
+• Everything above is free, for good, for everyone. Paid plans add extras on top, and nothing here will ever move behind them.
+
+ALSO IN YOUR VAULT
+• Payment cards, addresses and secure notes, in folders, with custom fields.
+• A trash that keeps what you delete, and every earlier version of a login.
+• Locks itself when you step away.
+
+Made by Keyrook, the maker of Keyrook Authenticator.

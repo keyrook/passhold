@@ -1,6 +1,6 @@
 {
   "name": "@passhold/extension",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Passhold — Chrome MV3 extension.",
@@ -8,11 +8,12 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "zip": "node scripts/build.mjs --zip",
-    "test:e2e": "npm run build && playwright test --project=e2e",
-    "review": "npm run build && playwright test --project=review"
+    "test:e2e": "node scripts/build.mjs --test && playwright test --project=e2e",
+    "locale:check": "vite-node scripts/check-locale.ts"
   },
   "dependencies": {
     "@passhold/core": "*",
+    "qr": "0.7.2",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

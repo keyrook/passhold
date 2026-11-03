@@ -1,0 +1,43 @@
+Passhold je správce hesel, zdarma navždy: vyplňuje vaše přihlášení, uchovává přístupové klíče a generuje silná hesla. Váš trezor je šifrovaný end-to-end na vašem počítači a synchronizuje se mezi počítači přes účet Keyrook. Zdrojový kód je otevřený, takže si každý může ověřit, jak to funguje.
+
+VYPLŇOVÁNÍ NA KAŽDÉM WEBU
+• Jedno kliknutí do přihlašovacího pole vyplní správný účet pro daný web.
+• Ukládá nová přihlášení při přihlašování a aktualizuje ta, která změníte.
+• Vyplňuje karty a adresy při platbě, jen tam, kde to vyberete.
+• Přihlásí vás přístupovými klíči na webech, které je nabízejí.
+• Funguje ve formulářích uvnitř rámců, jaké mají přihlášení v mnoha bankách a obchodech.
+• Klávesová zkratka kdykoli otevře váš trezor.
+
+SILNÁ A JEDINEČNÁ
+• Generátor hesel: silné a jedinečné heslo pro každý účet.
+• Zvolte délku a znaky a vynechte podobné znaky, jako 0 a O.
+• Kontrola zabezpečení: najde slabá a opakovaně použitá hesla a ukáže, co opravit jako první.
+
+SYNCHRONIZACE MEZI POČÍTAČI
+• Jeden účet Keyrook, s vlastním heslem nebo přes Google či GitHub.
+• Odemykání pomocí Touch ID nebo Windows Hello, PINu nebo bezpečnostního klíče.
+• Šifrované zálohy, které si uchováváte sami.
+
+SNADNÝ VSTUP, SNADNÝ ODCHOD
+• Importujte přihlášení souborem CSV, z prohlížeče nebo z většiny jiných správců.
+• Exportujte je kdykoli, jako soubor CSV nebo šifrovanou zálohu. Vaše data zůstávají vaše.
+
+SOUKROMÉ OD ZÁKLADU
+• Zero-knowledge: vše se zašifruje algoritmem AES-256-GCM na vašem počítači, dřív než odejde. Keyrook uchovává, co synchronizujete, a nemůže to číst.
+• Klíč, který otevírá váš trezor, se ke Keyrook nikdy nedostane.
+• Žádné reklamy, žádné trackery, žádná analytika.
+• Ikony webů jsou vestavěné, takže žádný server se nedozví, kde máte účty.
+• Přihlášení se nabízí jen na jeho vlastním webu, takže falešná stránka nic nedostane.
+• Pole, která nevidíte, se nikdy nevyplní, a karty jen na zabezpečených stránkách.
+• Zkopírované heslo se po chvíli smaže ze schránky.
+• Otevřený zdrojový kód: přečtěte si ho na GitHubu.
+
+ZDARMA NAVŽDY
+• Vše výše je zdarma, navždy a pro všechny. Placené tarify jen přidávají něco navíc a nic z toho se nikdy nestane placeným.
+
+TAKÉ VE VAŠEM TREZORU
+• Platební karty, adresy a bezpečné poznámky, ve složkách, s vlastními poli.
+• Koš, který uchovává, co smažete, a každou dřívější verzi přihlášení.
+• Zamkne se sám, když odejdete od počítače.
+
+Passhold vytváří Keyrook, výrobce Keyrook Authenticator.

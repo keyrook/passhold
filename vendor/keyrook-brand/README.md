@@ -18,7 +18,7 @@ itself speaks for — the account, emails, the brand's site, a "by Keyrook".
 | `src/icons.ts` | The interface icons, drawn in the same hand; `iconSvg(name)` |
 | `src/lettering.ts` | The wordmark's hand as an alphabet, for display words; `letter(text)` |
 | `brand.css` | The tokens as `--kr-*`, the type scale, `.kr-icon`, and every motion as a class |
-| `assets/` | The logo kit, SVG and PNG; each product's toolbar icons (`*-icon-16…128.png`); `icons/` and `keyrook-icons.svg`, the interface icons |
+| `assets/` | The logo kit, SVG and PNG; `keyrook-lockup-email-320.png`, the lockup on solid paper for the account's emails, embedded by `cid:`; each product's toolbar icons (`*-icon-16…128.png`); `icons/` and `keyrook-icons.svg`, the interface icons |
 | `guide.html` | What each piece is for, and what not to do |
 
 `brand.css`, `assets/` and `guide.html` are generated:

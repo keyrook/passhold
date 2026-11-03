@@ -25,28 +25,61 @@ release. Each release is tagged here (`vX.Y.Z`).
 - **Saves your logins** and fills them from a button in the sign-in field;
   offers to save new ones as you sign in.
 - **Generates strong passwords**, and suggests one on sign-up forms.
+- **Keeps payment cards, addresses and notes** beside the logins, and fills a
+  card or an address into a checkout from the same button — a card only on
+  https pages, and into the payment provider's own frames where a checkout
+  splits the card across them. Offers to save a card or an address you pay
+  with, named by its last four digits. A note is shown only in Passhold.
+- **Fields of your own and folders** on any login, card, address or note: a
+  PIN or a security question's answer, hidden like a password when you
+  choose and never filled into a page; a folder to show one group at a time.
+  Both are sealed inside the item, so a synced folder's name never reaches
+  the server.
+- **Keeps websites' passkeys**: when a site offers one, Passhold saves it with
+  your login and signs you in with it — from its own frame on the page, or
+  from the list under the username field. The private key never leaves
+  Passhold's service worker, and signs only for the site it was made for.
 - **Imports** the CSV exports of Chrome, Edge, Firefox, Safari, Apple
-  Passwords and other password managers, and **exports** to the CSV every one
-  of them reads — after asking for the master password.
+  Passwords and other password managers — their cards, addresses, notes,
+  folders and custom fields too, where the export holds them — and
+  **exports** to the CSV every one of them reads, after asking for the master
+  password.
 - **Encrypted backups**: the whole vault in one file, under the same master
   password, to keep somewhere else and restore from. Restoring into a vault
   adds what it lacks and removes nothing.
-- **Nothing leaves the machine.** No sync server, no favicon service, no breach
-  check: each would tell a server every site you have an account on. The
-  extension's pages are built with `connect-src 'none'`.
+- **A checkup** for weak and reused passwords and a backup that is due, worked
+  out on your device, with the way to each site's own change-password page.
+- **Suggestions in the field** as soon as you click it, **site logos**
+  compiled in (never fetched), **a PIN** for unlocking while the browser
+  stays open — never kept on disk, five tries — and **Touch ID or Windows
+  Hello**, through the device's own authenticator.
+- **Sync with your Keyrook account**, the one Keyrook Authenticator uses. Each
+  login is sealed on your device first: the server reads no password, name
+  or site. Sign in with Google or GitHub, or with a password. A new computer
+  opens with Google and the passkey Google Password Manager keeps, or is let
+  in by one already signed in after both show the same code. The account
+  comes with a recovery key, for the day nothing else is left. Signed out,
+  nothing leaves the machine. Only Keyrook's server is
+  reachable at all — it is the extension's one `connect-src` — so no favicon
+  service and no breach check: each would tell a server every site you have
+  an account on.
 - English and Vietnamese.
 
 ## What is here
 
 ```
 packages/core/          @passhold/core — encryption, the vault, site matching, the
-                        generator, CSV import and export, backups. No chrome.*, no
-                        DOM: written to be reused by desktop and mobile apps.
+                        generator, CSV import and export, backups, the checkup and
+                        the PIN. No chrome.*, no DOM: written to be reused by
+                        desktop and mobile apps.
 apps/extension/         The MV3 extension: service worker, popup, settings page,
                         the content script, and the inline list and save prompt.
 vendor/keyrook-brand/   Keyrook's colours, marks and motion, which the extension
                         is drawn with.
+vendor/keyrook-account/ The Keyrook account's code: how a password becomes keys,
+                        the account's root and each app's key, the recovery key.
 docs/security.md        What Passhold defends against, and how.
+NOTICE.md               Where the site logos come from, and their licences.
 ```
 
 ## Security in brief

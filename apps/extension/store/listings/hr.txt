@@ -1,0 +1,43 @@
+Passhold je upravitelj lozinki, besplatan zauvijek, koji automatski popunjava vaše prijave, čuva pristupne ključeve i generira jake lozinke. Vaš trezor šifriran je od kraja do kraja na vašem računalu i sinkronizira se među vašim računalima preko Keyrook računa. Izvorni kod je otvoren, pa svatko može provjeriti kako sve radi.
+
+AUTOMATSKO POPUNJAVANJE NA SVAKOJ STRANICI
+• Jedan klik u polje za prijavu popunjava pravi račun za tu stranicu.
+• Sprema nove prijave dok se prijavljujete i ažurira one koje promijenite.
+• Popunjava kartice i adrese na blagajni, samo tamo gdje vi odaberete.
+• Prijavljuje vas pristupnim ključevima na stranicama koje ih nude.
+• Radi u obrascima unutar okvira, kako je izrađeno mnogo prijava za banke i trgovine.
+• Tipkovni prečac u bilo kojem trenutku otvara vaš trezor.
+
+JAKE I JEDINSTVENE
+• Generator lozinki: jaka i jedinstvena lozinka za svaki račun.
+• Odaberite duljinu i znakove, a izostavite slične znakove poput 0 i O.
+• Sigurnosna provjera: pronalazi slabe i ponovljene lozinke i pokazuje što prvo popraviti.
+
+SINKRONIZIRANO NA VAŠIM RAČUNALIMA
+• Jedan Keyrook račun, sa vlastitom lozinkom ili s Googleom ili GitHubom.
+• Otključajte s Touch ID-jem, Windows Hello, PIN-om ili sigurnosnim ključem.
+• Šifrirane sigurnosne kopije koje sami čuvate.
+
+LAKO DOĆI, LAKO OTIĆI
+• Uvezite prijave pomoću CSV datoteke, iz preglednika ili većine drugih upravitelja.
+• Izvezite ih u bilo kojem trenutku, kao CSV datoteku ili šifriranu sigurnosnu kopiju. Vaši podaci ostaju vaši.
+
+PRIVATNO PO DIZAJNU
+• Zero-knowledge: sve se šifrira AES-256-GCM-om na vašem računalu prije nego što napusti. Keyrook pohranjuje ono što sinkronizirate i ne može to pročitati.
+• Ključ koji otvara vaš trezor nikad ne stiže do Keyrooka.
+• Bez oglasa, bez praćenja i bez analitike.
+• Ikone stranica ugrađene su, pa nijedan poslužitelj ne saznaje gdje imate račune.
+• Račun se nudi samo na vlastitoj stranici, pa lažna stranica ne dobiva ništa.
+• Polja koja ne vidite nikad se ne popunjavaju, a kartice se popunjavaju samo na sigurnim stranicama.
+• Kopirana lozinka uklanja se iz međuspremnika nakon kratkog vremena.
+• Otvoreni kod: pročitajte kod na GitHubu.
+
+BESPLATNO ZAUVIJEK
+• Sve gore navedeno besplatno je, zauvijek i za sve. Plaćeni paketi samo dodaju dodatne značajke i ništa od ovoga nikad neće postati plaćeno.
+
+JOŠ U VAŠEM TREZORU
+• Platne kartice, adrese i sigurne bilješke, u mapama, s prilagođenim poljima.
+• Koš koji čuva ono što obrišete i svaku raniju verziju prijave.
+• Zaključava se sam kad odete.
+
+Izradio Keyrook, proizvođač Keyrook Authenticatora.

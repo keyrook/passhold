@@ -1,0 +1,43 @@
+Passhold är en lösenordshanterare, gratis för alltid, som fyller i dina inloggningar automatiskt, sparar dina passkeys och skapar starka lösenord. Ditt valv är krypterat från början till slut på din dator och synkroniseras mellan dina datorer med ett Keyrook-konto. Den är öppen källkod, så vem som helst kan kontrollera hur den fungerar.
+
+FYLLER I AUTOMATISKT PÅ VARJE WEBBPLATS
+• Ett klick i ett inloggningsfält fyller i rätt konto för webbplatsen.
+• Sparar nya inloggningar när du loggar in, och uppdaterar de du ändrar.
+• Fyller i kort och adresser i kassan, bara där du väljer det.
+• Loggar in dig med passkeys på de webbplatser som erbjuder dem.
+• Fungerar i formulär inne i ramar, som många bank- och butiksinloggningar är byggda med.
+• En snabbtangent öppnar ditt valv när som helst.
+
+STARKT OCH UNIKT
+• Lösenordsgenerator: ett starkt, unikt lösenord för varje konto.
+• Välj längd och tecken, och uteslut tecken som liknar varandra, som 0 och O.
+• Säkerhetskoll: hittar svaga och återanvända lösenord, och visar vad du bör åtgärda först.
+
+SYNKAT MELLAN DINA DATORER
+• Ett Keyrook-konto, med eget lösenord eller med Google eller GitHub.
+• Lås upp med Touch ID, Windows Hello, en PIN-kod eller en säkerhetsnyckel.
+• Krypterade säkerhetskopior som du själv förvarar.
+
+LÄTT ATT FLYTTA IN, LÄTT ATT LÄMNA
+• Importera dina inloggningar med en CSV-fil, från din webbläsare eller de flesta andra hanterare.
+• Exportera dem när som helst, som CSV-fil eller som krypterad säkerhetskopia. Dina uppgifter förblir dina.
+
+INTEGRITET FRÅN GRUNDEN
+• Zero-knowledge: allt krypteras med AES-256-GCM på din dator innan det lämnar den. Keyrook lagrar det du synkar och kan inte läsa det.
+• Nyckeln som öppnar ditt valv når aldrig Keyrook.
+• Inga annonser, inga spårare, ingen analys.
+• Webbplatsikoner är inbyggda, så ingen server får veta var du har konton.
+• Ett konto erbjuds bara på sin egen webbplats, så en falsk sida får ingenting.
+• Fält du inte ser fylls aldrig i, och kort fylls bara i på säkra sidor.
+• Ett kopierat lösenord rensas från urklippet efter en kort stund.
+• Öppen källkod: läs koden på GitHub.
+
+GRATIS FÖR ALLTID
+• Allt ovan är gratis, för alltid och för alla. Betalda abonnemang lägger bara till extra funktioner, och inget av detta kommer någonsin att kosta pengar.
+
+ÄVEN I DITT VALV
+• Betalkort, adresser och säkra anteckningar, i mappar, med egna fält.
+• En papperskorg som behåller det du tar bort, och varje tidigare version av en inloggning.
+• Låser sig när du går ifrån den.
+
+Från Keyrook, tillverkaren av Keyrook Authenticator.

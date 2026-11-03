@@ -1,0 +1,43 @@
+Passhold ialah pengurus kata laluan yang mengisi kata laluan dan kunci laluan anda, serta menyimpannya disulitkan pada komputer anda. Log masuk dengan akaun Keyrook anda, dan ia akan mengikut anda ke setiap komputer yang anda guna. Percuma selamanya dan sumber terbuka, jadi sesiapa pun boleh menyemak cara ia berfungsi.
+
+ISI AUTOMATIK TANPA TAIP
+• Setiap medan log masuk mempunyai butang yang menyenaraikan log masuk untuk laman itu. Satu klik untuk mengisinya.
+• Menawarkan untuk menyimpan log masuk apabila anda menghantarnya, dan untuk mengemas kini kata laluan yang anda tukar.
+• Kunci laluan laman web: simpan di sini dan log masuk dengan satu klik.
+• Kad dan alamat diisi pada halaman pembayaran, hanya di tempat yang anda pilih.
+• Berfungsi dalam borang di dalam bingkai, seperti banyak log masuk bank dan kedai dalam talian.
+• Pintasan papan kekunci membuka peti kebal anda pada bila-bila masa.
+
+KUAT DAN UNIK
+• Penjana kata laluan yang kuat dan unik untuk setiap akaun.
+• Pilih panjang dan aksara, dan elak aksara yang mirip seperti 0 dan O.
+• Semakan keselamatan: mengesan kata laluan yang lemah dan yang digunakan semula, serta menunjukkan yang perlu ditukar dahulu.
+
+DISELARAS MERENTAS KOMPUTER
+• Satu akaun Keyrook, dengan kata laluan sendiri atau dengan Google atau GitHub.
+• Buka kunci dengan Touch ID atau Windows Hello, PIN atau kunci keselamatan.
+• Sandaran yang disulitkan dan anda simpan sendiri.
+
+MUDAH MASUK, MUDAH KELUAR
+• Import log masuk anda dengan fail CSV, daripada pelayar atau kebanyakan pengurus lain.
+• Eksport pada bila-bila masa, sebagai fail CSV atau sandaran disulitkan. Data anda kekal milik anda.
+
+PERIBADI SEJAK DARI REKA BENTUK
+• Zero-knowledge: semuanya disulitkan dengan AES-256-GCM pada komputer anda sebelum keluar. Pelayan Keyrook menyimpan apa yang anda selaraskan, tetapi tidak boleh membacanya.
+• Kunci yang membuka peti kebal anda tidak pernah sampai ke Keyrook.
+• Tiada iklan, tiada penjejak, tiada analitik.
+• Ikon laman web sudah dibina dalam aplikasi, tidak dimuat turun, jadi tiada pelayan tahu anda mempunyai akaun di mana.
+• Log masuk hanya ditawarkan di laman webnya sendiri, jadi laman tiruan tidak mendapat apa-apa.
+• Medan yang tidak kelihatan tidak pernah diisi, dan kad hanya diisi pada laman yang selamat.
+• Kata laluan yang disalin dikosongkan daripada papan keratan selepas seketika.
+• Sumber terbuka: sesiapa boleh membaca kod di GitHub.
+
+PERCUMA SELAMANYA
+• Semua yang di atas percuma, selamanya, untuk semua orang. Pelan berbayar hanya menambah ciri tambahan, dan semua ini tidak akan sekali-kali menjadi berbayar.
+
+JUGA DALAM PETI ANDA
+• Log masuk, kunci laluan, kad, alamat dan nota, dalam folder, dengan medan tersendiri.
+• Tong sampah menyimpan apa yang anda padam, dan kata laluan terdahulu bagi setiap log masuk.
+• Mengunci diri apabila anda meninggalkan komputer.
+
+Passhold dibuat oleh Keyrook, pembuat Keyrook Authenticator.

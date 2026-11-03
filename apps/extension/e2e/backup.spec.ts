@@ -1,4 +1,4 @@
-import { addLogin, diskDump, downloadBackup, expect, MASTER, openPopup, openSettings, setUp, test } from './fixtures.js';
+import { addLogin, diskDump, downloadBackup, expect, MASTER, openBackupForm, openPopup, openSettings, passwordsView, settingsTab, setUp, test } from './fixtures.js';
 
 const restoreFile = (buffer: Buffer) => ({ name: 'passhold-backup.json', mimeType: 'application/json', buffer });
 
@@ -7,6 +7,7 @@ test('a backup brings the vault back to a browser that lost it', async ({ contex
   await addLogin(popup, { title: 'Example', username: 'alice@example.test', password: 'Tr0ub4dor&3-unique', url: 'https://login.example.test/' });
 
   const options = await openSettings(context, extensionId);
+  await openBackupForm(options);
   await expect(options.getByTestId('last-backup')).toHaveText('No backup yet.');
 
   // The backup opens only with the master password, so it asks for it.
@@ -22,34 +23,30 @@ test('a backup brings the vault back to a browser that lost it', async ({ contex
     expect(text).not.toContain(secret);
   }
 
-  // The browser loses its vault.
+  // The browser loses its vault, and a new one is made — as signing in again makes one.
+  await settingsTab(options, 'General');
   await options.getByLabel('Type delete to confirm').fill('delete');
   await options.getByRole('button', { name: 'Remove vault' }).click();
-  await expect(options.getByText(/^There is no vault in this browser yet\./)).toBeVisible();
-  expect(await diskDump(worker)).not.toContain('passhold.vault');
+  await expect.poll(async () => diskDump(worker)).not.toContain('passhold.vault');
+  const fresh = await setUp(context, extensionId);
+  await expect(fresh.getByText('alice@example.test')).toHaveCount(0);
 
-  await options.getByTestId('restore-file').setInputFiles(restoreFile(backup));
-  await expect(options.getByText(/^Backup made /)).toBeVisible();
-  await options.getByLabel('Master password of the backup').fill('not the password at all');
-  await options.getByRole('button', { name: 'Restore', exact: true }).click();
-  await expect(options.locator('#restore').getByText('That is not the master password this backup was made with.')).toBeVisible();
-
-  await options.getByLabel('Master password of the backup').fill(MASTER);
-  await options.getByRole('button', { name: 'Restore', exact: true }).click();
-  await expect(options.getByText('Vault restored, with 1 login.')).toBeVisible();
-  await expect(options.getByRole('heading', { name: 'General' })).toBeVisible();
+  // The backup opens only with the master password it was made with, and brings the login back.
+  const restoring = await openSettings(context, extensionId, '#restore');
+  await restoring.getByTestId('restore-file').setInputFiles(restoreFile(backup));
+  await expect(restoring.getByText(/^Backup made /)).toBeVisible();
+  await restoring.getByLabel('Master password of the backup').fill('not the password at all');
+  await restoring.getByRole('button', { name: 'Restore', exact: true }).click();
+  await expect(restoring.locator('#restore').getByText('That is not the master password this backup was made with.')).toBeVisible();
+  await restoring.getByLabel('Master password of the backup').fill(MASTER);
+  await restoring.getByRole('button', { name: 'Restore', exact: true }).click();
+  await expect(restoring.getByText('Added 1 item from the backup.')).toBeVisible();
 
   // Open, with the login, and still nothing readable on disk.
-  const again = await openPopup(context, extensionId);
-  await expect(again.getByText('alice@example.test')).toBeVisible();
+  await fresh.reload();
+  await expect(fresh.getByText('alice@example.test')).toBeVisible();
   const disk = await diskDump(worker);
   for (const secret of ['Tr0ub4dor&3-unique', 'alice@example.test', MASTER]) expect(disk).not.toContain(secret);
-
-  // And it locks and opens with the backup's master password, as before.
-  await again.getByRole('button', { name: 'Lock' }).click();
-  await again.locator('#master').fill(MASTER);
-  await again.getByRole('button', { name: 'Unlock' }).click();
-  await expect(again.getByText('alice@example.test')).toBeVisible();
 });
 
 test('restoring into a vault adds what it lacks and removes nothing', async ({ context, extensionId }) => {
@@ -63,16 +60,19 @@ test('restoring into a vault adds what it lacks and removes nothing', async ({ c
   await popup.getByText('alice').first().click();
   await popup.getByRole('button', { name: 'Move to trash' }).click();
   await options.reload();
+  await passwordsView(options, 'Trash');
   await options.getByRole('button', { name: 'Delete forever' }).click();
   await expect(options.getByText('The trash is empty.')).toBeVisible();
 
+  await settingsTab(options, 'Account & sync');
+  await options.getByRole('button', { name: /^Restore from a backup/ }).click();
   const restore = async () => {
     await options.getByTestId('restore-file').setInputFiles(restoreFile(backup));
     await options.getByLabel('Master password of the backup').fill(MASTER);
     await options.getByRole('button', { name: 'Restore', exact: true }).click();
   };
   await restore();
-  await expect(options.getByText('Added 1 login from the backup.')).toBeVisible();
+  await expect(options.getByText('Added 1 item from the backup.')).toBeVisible();
   await restore();
   await expect(options.getByText('Everything in the backup is already in this vault.')).toBeVisible();
 
@@ -81,11 +81,9 @@ test('restoring into a vault adds what it lacks and removes nothing', async ({ c
   await expect(popup.getByText('bob')).toBeVisible();
 });
 
-test('the setup screen leads to restoring, and a file that is not a backup is refused', async ({ context, extensionId }) => {
-  const popup = await openPopup(context, extensionId);
-  const [options] = await Promise.all([context.waitForEvent('page'), popup.getByRole('button', { name: 'Restore from a backup' }).click()]);
-  await expect(options).toHaveURL(/options\.html#restore$/);
-  await expect(options.getByRole('heading', { name: 'Restore from a backup' })).toBeVisible();
+test('a file that is not a backup is refused', async ({ context, extensionId }) => {
+  await setUp(context, extensionId);
+  const options = await openSettings(context, extensionId, '#restore');
 
   await options.getByTestId('restore-file').setInputFiles({
     name: 'Chrome Passwords.csv',

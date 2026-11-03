@@ -7,13 +7,23 @@ import { fieldKind, firstLogin, isPasswordField, loginFieldsIn, newPasswordField
  * a framework's wrapper — and then the events a person's typing would raise,
  * so React, Vue and plain listeners all see the change.
  */
-function type(input: HTMLInputElement, value: string): void {
+export function type(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   input.focus({ preventScroll: true });
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
   if (setter) setter.call(input, value);
   else input.value = value;
   input.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertReplacementText', data: value }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+/** Choosing an option as a person would, through the browser's own setter, with the events a choice raises. */
+export function choose(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+  if (setter) setter.call(select, value);
+  else select.value = value;
+  select.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 /**
@@ -48,7 +58,8 @@ export function fill(message: Extract<ToContent, { type: 'ph/fill' }>, anchor: H
     filled = true;
   }
   const password = passwords[0];
-  if (password) {
+  // A login with only a passkey has no password to type: its username is what it fills.
+  if (password && message.password) {
     type(password, message.password);
     filled = true;
   }

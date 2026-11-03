@@ -1,0 +1,43 @@
+Passhold és un gestor de contrasenyes gratis per sempre que omple els teus inicis de sessió, guarda les teves claus d’accés i genera contrasenyes segures. La teva caixa forta està xifrada d’extrem a extrem al teu ordinador i se sincronitza entre els teus ordinadors amb un compte de Keyrook. És de codi obert, així que qualsevol pot comprovar com funciona.
+
+EMPLENAMENT AUTOMÀTIC A TOTS ELS LLOCS
+• Un clic en un camp d’inici de sessió omple el compte correcte per a aquell lloc.
+• Desa els nous inicis de sessió quan els fas servir, i actualitza els que canvies.
+• Omple targetes i adreces al pagament, només on tu les triïs.
+• Et fa entrar amb claus d’accés als llocs que en tenen.
+• Funciona en formularis dins de marcs, com estan fets molts accessos de bancs i botigues.
+• Una drecera de teclat obre la teva caixa forta en qualsevol moment.
+
+FORTES I ÚNIQUES
+• Generador de contrasenyes: una contrasenya forta i única per a cada compte.
+• Tria la llargada i els caràcters, i deixa fora els que es confonen, com el 0 i la O.
+• Revisió de seguretat: troba les contrasenyes febles o repetides, i mostra per quina cal començar.
+
+SINCRONITZAT ENTRE ELS TEUS ORDINADORS
+• Un compte de Keyrook, amb la seva pròpia contrasenya o amb Google o GitHub.
+• Desbloqueig amb Touch ID, Windows Hello, un PIN o una clau de seguretat.
+• Còpies de seguretat xifrades que guardes tu mateix.
+
+FÀCIL D’ENTRAR, FÀCIL DE SORTIR
+• Importa els teus inicis de sessió amb un fitxer CSV, des del navegador o de la majoria d’altres gestors.
+• Exporta’ls en qualsevol moment, com a fitxer CSV o còpia de seguretat xifrada. Les teves dades continuen sent teves.
+
+PRIVAT PER DISSENY
+• Zero-knowledge: tot es xifra amb AES-256-GCM al teu ordinador abans de sortir-ne. Keyrook guarda el que sincronitzes, però no el pot llegir.
+• La clau que obre la teva caixa forta no arriba mai a Keyrook.
+• Sense publicitat, sense rastrejadors, sense analítica.
+• Les icones dels llocs són integrades: cap servidor no sap on tens comptes.
+• Un compte només es proposa al seu propi lloc, així que una pàgina falsificada no rep res.
+• Els camps que no veus no s’omplen mai, i les targetes només en pàgines segures.
+• Una contrasenya copiada s’esborra del portapapers al cap de poc temps.
+• Codi obert: llegeix el codi a GitHub.
+
+GRATIS PER SEMPRE
+• Tot l’anterior és gratis, per sempre, per a tothom. Els plans de pagament només hi afegeixen extres, i res d’això no passarà mai a ser de pagament.
+
+TAMBÉ A LA TEVA CAIXA FORTA
+• Targetes de pagament, adreces i notes segures, en carpetes, amb camps propis.
+• Una paperera que guarda el que suprimeixes, i cada versió anterior d’un inici de sessió.
+• Es bloqueja sol quan t’allunyes.
+
+Fet per Keyrook, el creador de Keyrook Authenticator.

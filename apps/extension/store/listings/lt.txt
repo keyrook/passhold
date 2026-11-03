@@ -1,0 +1,43 @@
+Passhold yra slaptažodžių tvarkyklė, nemokama visam laikui, kuri automatiškai pildo jūsų prisijungimus, saugo jūsų passkeys ir kuria stiprius slaptažodžius. Jūsų saugykla šifruojama nuo galo iki galo jūsų kompiuteryje, o ji sinchronizuojama tarp jūsų kompiuterių per Keyrook paskyrą. Tai atviras kodas, todėl bet kas gali patikrinti, kaip jis veikia.
+
+AUTOMATINIS PILDYMAS KIEKVIENOJE SVETAINĖJE
+• Vienas spustelėjimas prisijungimo lauke užpildo tinkamą paskyrą tai svetainei.
+• Išsaugo naujus prisijungimus, kai prisijungiate, ir atnaujina pakeistus.
+• Užpildo korteles ir adresus atsiskaitant, tik ten, kur pasirenkate.
+• Prisijungia passkeys svetainėse, kurios jas siūlo.
+• Veikia rėmuose įterptose formose, kokios naudojamos daugelio bankų ir parduotuvių prisijungimuose.
+• Klaviatūros spartusis klavišas bet kada atveria jūsų saugyklą.
+
+STIPRU IR UNIKALU
+• Slaptažodžių generatorius: stiprus ir unikalus slaptažodis kiekvienai paskyrai.
+• Pasirinkite ilgį ir simbolius bei neįtraukite panašių simbolių, pavyzdžiui, 0 ir O.
+• Saugumo patikra: randa silpnus ir kelis kartus naudotus slaptažodžius ir parodo, ką pirmiausia taisyti.
+
+SINCHRONIZAVIMAS TARP JŪSŲ KOMPIUTERIŲ
+• Viena Keyrook paskyra, su jos pačios slaptažodžiu arba su Google ar GitHub.
+• Atrakinkite su Touch ID, Windows Hello, PIN kodu ar saugumo raktu.
+• Šifruotos atsarginės kopijos, kurias saugote patys.
+
+LENGVA ĮEITI, LENGVA IŠEITI
+• Importuokite savo prisijungimus CSV failu iš naršyklės ar daugumos kitų tvarkyklių.
+• Eksportuokite juos bet kada kaip CSV failą arba šifruotą atsarginę kopiją. Jūsų duomenys lieka jūsų.
+
+PRIVATUMAS IŠ PRIGIMTIES
+• Nulinės žinios: viskas užšifruojama AES-256-GCM jūsų kompiuteryje, prieš jam išeinant. Keyrook saugo tai, ką sinchronizuojate, ir negali to perskaityti.
+• Raktas, atrakinantis jūsų saugyklą, niekada nepasiekia Keyrook.
+• Jokių skelbimų, sekimo priemonių ar analitikos.
+• Svetainių piktogramos įdiegtos, todėl joks serveris nežino, kur turite paskyrų.
+• Paskyra siūloma tik jos pačios svetainėje, todėl netikra svetainė nieko negauna.
+• Nematomi laukai niekada nepildomi, o kortelės – tik saugiuose puslapiuose.
+• Nukopijuotas slaptažodis po trumpo laiko išvalomas iš iškarpinės.
+• Atviras kodas: perskaitykite kodą GitHub.
+
+VISADA NEMOKAMA
+• Visa tai nemokama, visam laikui ir visiems. Mokami planai tik prideda papildomų funkcijų, ir niekas iš to niekada netaps mokama.
+
+TAIP PAT JŪSŲ SAUGYKLOJE
+• Mokėjimo kortelės, adresai ir slapti užrašai aplankuose, su savais laukais.
+• Šiukšlių dėžė, kuri saugo ištrintus įrašus, ir ankstesnes kiekvieno prisijungimo versijas.
+• Užsirakina pats, kai nueinate.
+
+Pagamino Keyrook, Keyrook Authenticator kūrėjas.

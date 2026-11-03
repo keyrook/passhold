@@ -23,7 +23,7 @@ test('locks, refuses a wrong password, and opens with the right one', async ({ c
 
   await popup.locator('#master').fill(MASTER);
   await popup.getByRole('button', { name: 'Unlock' }).click();
-  await expect(popup.getByRole('button', { name: 'New login' }).first()).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Add', exact: true })).toBeVisible();
 });
 
 test('the session key never reaches the disk, and locking forgets it', async ({ context, extensionId, worker }) => {
@@ -43,7 +43,10 @@ test('settings open locked, and a forgotten vault can be removed', async ({ cont
   await popup.getByRole('button', { name: 'Lock' }).click();
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
-  await expect(options.getByText('Unlock Passhold from the toolbar to change settings.')).toBeVisible();
+  await expect(options.getByRole('heading', { name: 'Passhold is locked' })).toBeVisible();
+  // The way out is there, but behind a quiet link: not the next step beside the unlock button.
+  await expect(options.getByRole('button', { name: 'Remove vault' })).toHaveCount(0);
+  await options.getByRole('button', { name: 'Cannot open it at all? Remove the vault from this browser' }).click();
   const remove = options.getByRole('button', { name: 'Remove vault' });
   await expect(remove).toBeDisabled();
   await options.getByLabel('Type delete to confirm').fill('delete');
@@ -70,12 +73,91 @@ test('imports a Chrome export and skips what it already has', async ({ context, 
   await expect(popup.getByText('bob')).toBeVisible();
 });
 
+test('imports NordPass’s logins, cards, addresses and notes, and says what two-step codes a file leaves behind', async ({ context, extensionId }) => {
+  const popup = await setUp(context, extensionId);
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html#import`);
+  await options.getByTestId('import-file').setInputFiles({
+    name: 'nordpass.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      'name,url,additional_urls,username,password,note,cardholdername,cardnumber,cvc,expirydate,zipcode,folder,full_name,phone_number,email,address1,address2,city,country,state,type,custom_fields\n' +
+        'Mail,https://mail.example.test,,alice,pw-one,,,,,,,,,,,,,,,,password,\n' +
+        'Visa,,,,,,Alice Doe,4111111111111111,123,01 / 31,,,,,,,,,,,credit_card,\n' +
+        'Home,,,,,,,,,,100000,,Alice Doe,,,12 Lý Thường Kiệt,,Hà Nội,Vietnam,,identity,\n' +
+        'Wi-Fi,,,,,home-network: pass-7Q!,,,,,,,,,,,,,,,note,\n',
+    ),
+  });
+  await expect(options.getByText('Found 1 login, 1 card, 1 address, and 1 note to import.')).toBeVisible();
+  // NordPass writes no two-step codes: nothing to warn of.
+  await expect(options.getByText('two-step (2FA)', { exact: false })).toHaveCount(0);
+  await options.getByRole('button', { name: 'Import', exact: true }).click();
+  await expect(options.getByText(/Imported 1 login, 1 card, 1 address, and 1 note\./)).toBeVisible();
+  await popup.reload();
+  for (const name of [/^Mail/, /^Visa •••• 1111/, /^Home/, /^Wi-Fi/]) await expect(popup.getByRole('button', { name })).toBeVisible();
+
+  // A file whose logins carry two-step codes: said before the import and after it, with where to keep them.
+  await options.getByTestId('import-file').setInputFiles({
+    name: 'bitwarden.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      'folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n' +
+        ',,login,Bank,,,0,https://bank.example.test,bob,pw-two,JBSWY3DPEHPK3PXP\n' +
+        ',,login,Shop,,,0,https://shop.example.test,bob,pw-three,otpauth://totp/Shop?secret=KRSXG5CTMVRXEZLU\n',
+    ),
+  });
+  const warning = options.getByText('2 logins in this file have two-step (2FA) codes.', { exact: false });
+  await expect(warning).toBeVisible();
+  await expect(options.getByRole('link', { name: 'Get Keyrook Authenticator' })).toHaveAttribute('href', 'https://keyrook.com/authenticator/');
+  await options.getByRole('button', { name: 'Import', exact: true }).click();
+  await expect(options.getByText(/Imported 2 logins\./)).toBeVisible();
+  await expect(warning).toBeVisible();
+  // The codes are counted, never kept: not in the vault, opened.
+  const vault = await popup.evaluate(() => chrome.runtime.sendMessage({ type: 'vault/status' }));
+  expect(JSON.stringify(vault)).toContain('pw-two');
+  for (const secret of ['JBSWY3DPEHPK3PXP', 'KRSXG5CTMVRXEZLU']) expect(JSON.stringify(vault)).not.toContain(secret);
+});
+
+test('imports Bitwarden’s JSON, its cards and identities with it, and names the encrypted export it cannot open', async ({ context, extensionId }) => {
+  const popup = await setUp(context, extensionId);
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html#import`);
+  await options.getByTestId('import-file').setInputFiles({
+    name: 'bitwarden_encrypted_export.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ encrypted: true, passwordProtected: true, salt: 's', kdfIterations: 600000, kdfType: 0, encKeyValidation_DO_NOT_EDIT: '2.x', data: '2.y' })),
+  });
+  await expect(options.getByText('That Bitwarden export is encrypted', { exact: false })).toBeVisible();
+  await options.getByTestId('import-file').setInputFiles({
+    name: 'bitwarden_export.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({
+        encrypted: false,
+        folders: [],
+        items: [
+          { type: 1, name: 'Code host', notes: null, favorite: false, login: { uris: [{ uri: 'https://code.example.test' }], username: 'jdoe', password: 'pw-gh', totp: 'JBSWY3DPEHPK3PXP' } },
+          { type: 3, name: 'Visa', notes: null, favorite: false, card: { cardholderName: 'John Doe', number: '4242424242424242', expMonth: '4', expYear: '2031', code: '123' } },
+          { type: 4, name: 'Home', notes: null, favorite: false, identity: { firstName: 'John', lastName: 'Doe', address1: '1 Main St', city: 'Springfield', postalCode: '62701', country: 'US' } },
+        ],
+      }),
+    ),
+  });
+  await expect(options.getByText('Found 1 login, 1 card, and 1 address to import.')).toBeVisible();
+  await expect(options.getByText('1 login in this file has a two-step (2FA) code.', { exact: false })).toBeVisible();
+  await options.getByRole('button', { name: 'Import', exact: true }).click();
+  await expect(options.getByText(/Imported 1 login, 1 card, and 1 address\./)).toBeVisible();
+  await popup.reload();
+  for (const name of [/^Code host/, /^Visa •••• 4242/, /^Home/]) await expect(popup.getByRole('button', { name })).toBeVisible();
+});
+
 test('speaks Vietnamese when the choice is made', async ({ context, extensionId }) => {
   await setUp(context, extensionId);
   const options = await context.newPage();
   await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.getByRole('button', { name: 'General', exact: true }).click();
   await options.getByLabel('Language').selectOption('vi');
-  await expect(options.getByRole('heading', { name: 'Cài đặt' })).toBeVisible();
+  await expect(options.getByRole('navigation', { name: 'Cài đặt' })).toBeVisible();
   const popup = await openPopup(context, extensionId);
   await expect(popup.getByRole('button', { name: 'Thêm đăng nhập' }).first()).toBeVisible();
 });

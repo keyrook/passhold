@@ -1,0 +1,43 @@
+Passhold ist ein Passwort-Manager, für immer kostenlos: Er füllt Ihre Zugangsdaten automatisch aus, bewahrt Ihre Passkeys auf und erzeugt starke Passwörter. Ihr Tresor ist auf Ihrem Computer Ende-zu-Ende-verschlüsselt und wird über ein Keyrook-Konto zwischen Ihren Computern synchronisiert. Der Quellcode ist offen, sodass jeder prüfen kann, wie alles funktioniert.
+
+AUTOMATISCH AUSFÜLLEN AUF JEDER WEBSITE
+• Ein Klick in ein Anmeldefeld füllt das richtige Konto für diese Website aus.
+• Speichert neue Zugangsdaten bei der Anmeldung und aktualisiert geänderte.
+• Füllt Karten und Adressen an der Kasse aus, nur dort, wo Sie es wählen.
+• Meldet Sie mit Passkeys an, auf allen Websites, die sie anbieten.
+• Funktioniert in Formularen innerhalb von Frames, wie viele Anmeldungen bei Banken und Shops aufgebaut sind.
+• Eine Tastenkombination öffnet Ihren Tresor jederzeit.
+
+STARK UND EINZIGARTIG
+• Passwortgenerator: ein starkes, einzigartiges Passwort für jedes Konto.
+• Wählen Sie Länge und Zeichen, und lassen Sie ähnlich aussehende Zeichen wie 0 und O weg.
+• Sicherheits-Check: findet schwache und mehrfach verwendete Passwörter und zeigt, was zuerst zu beheben ist.
+
+SYNCHRON AUF IHREN COMPUTERN
+• Ein Keyrook-Konto, mit eigenem Passwort oder mit Google oder GitHub.
+• Entsperren Sie mit Touch ID, Windows Hello, einer PIN oder einem Sicherheitsschlüssel.
+• Verschlüsselte Backups, die Sie selbst aufbewahren.
+
+EINFACH HINEIN, EINFACH HERAUS
+• Importieren Sie Ihre Zugangsdaten per CSV-Datei, aus Ihrem Browser oder den meisten anderen Managern.
+• Exportieren Sie sie jederzeit als CSV-Datei oder als verschlüsseltes Backup. Ihre Daten gehören weiterhin Ihnen.
+
+PRIVAT VON GRUND AUF
+• Zero-Knowledge: Alles wird auf Ihrem Computer mit AES-256-GCM verschlüsselt, bevor es ihn verlässt. Keyrook speichert, was Sie synchronisieren, und kann es nicht lesen.
+• Der Schlüssel, der Ihren Tresor öffnet, gelangt nie zu Keyrook.
+• Keine Werbung, keine Tracker, keine Analysen.
+• Website-Symbole sind eingebaut, daher erfährt kein Server, wo Sie Konten haben.
+• Ein Konto wird nur auf seiner eigenen Website angeboten, sodass eine täuschend ähnliche Seite nichts erhält.
+• Felder, die Sie nicht sehen, werden nie ausgefüllt, und Karten nur auf sicheren Seiten.
+• Ein kopiertes Passwort wird nach kurzer Zeit aus der Zwischenablage gelöscht.
+• Open Source: Lesen Sie den Code auf GitHub.
+
+FÜR IMMER KOSTENLOS
+• Alles oben Genannte ist kostenlos, für immer und für alle. Bezahlte Tarife bringen nur Extras obendrauf, und nichts davon wird jemals kostenpflichtig.
+
+AUCH IM TRESOR
+• Zahlungskarten, Adressen und sichere Notizen, in Ordnern und mit eigenen Feldern.
+• Ein Papierkorb, der aufbewahrt, was Sie löschen, und jede frühere Version eines Zugangs.
+• Sperrt sich selbst, wenn Sie sich entfernen.
+
+Von Keyrook, dem Hersteller von Keyrook Authenticator.

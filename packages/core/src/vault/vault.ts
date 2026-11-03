@@ -20,6 +20,8 @@ import {
   VAULT_SCHEMA_VERSION,
   type VaultData,
   type VaultFile,
+  type PasswordName,
+  type VaultSecret,
 } from './model.js';
 
 export { exportDataKey, importDataKey };
@@ -44,9 +46,15 @@ export function emptyData(): VaultData {
   return {
     schemaVersion: VAULT_SCHEMA_VERSION,
     items: [],
+    wallet: [],
     settings: structuredClone(DEFAULT_SETTINGS),
     neverSave: [],
     lastBackupAt: null,
+    pin: null,
+    recoveryKeyPending: false,
+    recoveryKey: null,
+    account: null,
+    families: [],
   };
 }
 
@@ -60,7 +68,7 @@ function checkMasterPassword(password: string): void {
  * password only wraps it, so changing the password later re-wraps 32 bytes
  * rather than re-encrypting every login.
  */
-export async function createVault(password: string, kdf: KdfParams = newKdfParams()): Promise<UnlockedVault> {
+export async function createVault(password: string, kdf: KdfParams = newKdfParams(), secret: VaultSecret = 'password'): Promise<UnlockedVault> {
   checkMasterPassword(password);
   const kek = await deriveKek(password, kdf);
   const dataKey = await generateDataKey();
@@ -73,6 +81,7 @@ export async function createVault(password: string, kdf: KdfParams = newKdfParam
     version: skeleton.version,
     id: skeleton.id,
     kdf,
+    secret,
     wrappedKey: await wrapDataKey(kek, dataKey),
     payload: await sealJson(dataKey, data, aad(skeleton)),
     createdAt: now,
@@ -156,6 +165,33 @@ export async function changeMasterPassword(
     ...file,
     kdf,
     wrappedKey: await wrapDataKey(await deriveKek(next, kdf), dataKey),
+    updatedAt: Date.now(),
+  };
+}
+
+export function secretOf(file: Pick<VaultFile, 'secret'>): VaultSecret {
+  return file.secret === 'recoveryKey' ? 'recoveryKey' : 'password';
+}
+
+export function passwordNameOf(file: Pick<VaultFile, 'passwordIs'>): PasswordName {
+  return file.passwordIs === 'account' || file.passwordIs === 'code' ? file.passwordIs : 'master';
+}
+
+/**
+ * The file under a new secret: a master password, or a recovery key in place
+ * of one. Nothing is checked here — the caller has had its owner prove
+ * themselves already, with the device or the current secret — so this takes
+ * the data key itself, which only an open vault holds.
+ */
+export async function rewrapVault(file: VaultFile, dataKey: CryptoKey, secret: string, kind: VaultSecret): Promise<VaultFile> {
+  checkMasterPassword(secret);
+  // A fresh salt, so the new wrapping shares nothing with the old one.
+  const kdf = newKdfParams();
+  return {
+    ...file,
+    kdf,
+    secret: kind,
+    wrappedKey: await wrapDataKey(await deriveKek(secret, kdf), dataKey),
     updatedAt: Date.now(),
   };
 }

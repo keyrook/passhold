@@ -1,11 +1,13 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
+import { accountPageFor, accountRpFor, checkApi, OFFICIAL_API } from './scripts/api.mjs';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 const alias = {
   '@passhold/core': resolve(import.meta.dirname, '../../packages/core/src/index.ts'),
   '@keyrook/brand': resolve(import.meta.dirname, '../../vendor/keyrook-brand/src/index.ts'),
+  '@keyrook/account': resolve(import.meta.dirname, '../../vendor/keyrook-account/src/index.ts'),
   '~': resolve(import.meta.dirname, 'src'),
 };
 
@@ -18,7 +20,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias },
   build: {
-    outDir: 'dist',
+    outDir: process.env.PASSHOLD_DIST ?? 'dist',
     emptyOutDir: true,
     target: 'chrome120',
     sourcemap: false,
@@ -28,6 +30,7 @@ export default defineConfig({
         options: resolve(import.meta.dirname, 'options.html'),
         menu: resolve(import.meta.dirname, 'menu.html'),
         prompt: resolve(import.meta.dirname, 'prompt.html'),
+        passkey: resolve(import.meta.dirname, 'passkey.html'),
         offscreen: resolve(import.meta.dirname, 'offscreen.html'),
         background: resolve(import.meta.dirname, 'src/background/index.ts'),
       },
@@ -47,5 +50,8 @@ export default defineConfig({
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
+    __KEYROOK_API__: JSON.stringify(checkApi(process.env.KEYROOK_API ?? OFFICIAL_API)),
+    __KEYROOK_ACCOUNT_RP__: JSON.stringify(accountRpFor(process.env.KEYROOK_API ?? OFFICIAL_API)),
+    __KEYROOK_ACCOUNT_PAGE__: JSON.stringify(accountPageFor(process.env.KEYROOK_API ?? OFFICIAL_API)),
   },
 });

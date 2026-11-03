@@ -52,11 +52,32 @@ export const ImportIcon = icon('import');
 export const ExportIcon = icon('export');
 export const GlobeIcon = icon('globe');
 export const UserIcon = icon('user');
+export const UsersIcon = icon('users');
 export const KeyIcon = icon('key');
 export const AlertIcon = icon('error');
 export const InfoIcon = icon('info');
 export const HistoryIcon = icon('history');
 export const UndoIcon = icon('undo');
+export const ShieldIcon = icon('shield');
+export const ShieldCheckIcon = icon('shield-check');
+export const BackupIcon = icon('backup');
+export const DownloadIcon = icon('download');
+export const UploadIcon = icon('upload');
+export const WarningIcon = icon('warning');
+export const SuccessIcon = icon('success');
+export const CodeIcon = icon('code');
+export const PasswordIcon = icon('password');
+export const FingerprintIcon = icon('fingerprint');
+export const CloudIcon = icon('cloud');
+export const CloudCheckIcon = icon('cloud-check');
+export const CloudOffIcon = icon('cloud-off');
+
+export const HomeIcon = icon('home');
+export const ListIcon = icon('list');
+export const FolderIcon = icon('folder');
+
+export const ArrowLeftIcon = icon('arrow-left');
+export const ChevronDownIcon = icon('chevron-down');
 
 function part(piece: MarkPart, index: number) {
   switch (piece.kind) {

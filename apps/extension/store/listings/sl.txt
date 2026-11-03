@@ -1,0 +1,43 @@
+Passhold je upravitelj gesel, zastonj za vedno: izpolnjuje vaše prijave, hrani ključe za dostop in ustvarja močna gesla. Vaš trezor je šifriran od konca do konca na vašem računalniku in se sinhronizira med računalniki prek računa Keyrook. Izvorna koda je odprta, zato lahko vsak preveri, kako deluje.
+
+IZPOLNJEVANJE NA VSAKEM SPLETNEM MESTU
+• En klik v polje za prijavo izpolni pravi račun za to spletno mesto.
+• Ob prijavi shrani nove prijave in posodobi tiste, ki jih spremenite.
+• Izpolni kartice in naslove ob plačilu, samo tam, kjer izberete.
+• Prijavi vas s ključi za dostop na spletnih mestih, ki jih ponujajo.
+• Deluje v obrazcih znotraj okvirjev, kot jih imajo številne bančne in trgovske prijave.
+• Bližnjica na tipkovnici kadarkoli odpre vaš trezor.
+
+MOČNA IN EDINSTVENA
+• Generator gesel: močno, edinstveno geslo za vsak račun.
+• Izberite dolžino in znake ter izpustite podobne znake, kot sta 0 in O.
+• Pregled varnosti: poišče šibka in ponovno uporabljena gesla ter pokaže, kaj popraviti najprej.
+
+SINHRONIZACIJA MED RAČUNALNIKI
+• En račun Keyrook, z lastnim geslom ali prek Google ali GitHub.
+• Odklepanje s Touch ID ali Windows Hello, s PIN-om ali varnostnim ključem.
+• Šifrirane varnostne kopije, ki jih hranite sami.
+
+LAHKO VSTOPITE, LAHKO ODIDETE
+• Uvozite prijave z datoteko CSV, iz brskalnika ali večine drugih upraviteljev.
+• Izvozite jih kadarkoli, kot datoteko CSV ali šifrirano varnostno kopijo. Vaši podatki ostanejo vaši.
+
+ZASEBNO OD ZAČETKA
+• Zero-knowledge: vse se na vašem računalniku šifrira z AES-256-GCM, preden odide. Keyrook hrani, kar sinhronizirate, vendar tega ne more brati.
+• Ključ, ki odpre vaš trezor, nikoli ne pride do Keyrook.
+• Brez oglasov, brez sledilnikov, brez analitike.
+• Ikone spletnih mest so vgrajene, zato noben strežnik ne izve, kje imate račune.
+• Prijava se ponudi samo na njenem spletnem mestu, zato lažna stran ne dobi ničesar.
+• Polja, ki jih ne vidite, se nikoli ne izpolnijo, kartice pa samo na varnih straneh.
+• Kopirano geslo se po kratkem času odstrani iz odložišča.
+• Odprta koda: kodo lahko preberete na GitHub.
+
+ZASTONJ ZA VEDNO
+• Vse zgoraj je zastonj, za vedno, za vse. Plačljivi načrti le dodajo dodatne funkcije in nič od tega nikoli ne bo postalo plačljivo.
+
+TUDI V VAŠEM TREZORJU
+• Plačilne kartice, naslovi in varne opombe, v mapah, s polji po meri.
+• Koš, ki hrani, kar izbrišete, in vsako prejšnjo različico prijave.
+• Zaklene se sam, ko se oddaljite od računalnika.
+
+Passhold izdeluje Keyrook, proizvajalec Keyrook Authenticator.

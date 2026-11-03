@@ -1,0 +1,43 @@
+Passhold ir paroļu pārvaldnieks, bez maksas uz visiem laikiem, kas automātiski aizpilda jūsu pieteikšanās datus, glabā jūsu passkeys un izveido stipras paroles. Jūsu seifs ir šifrēts no gala līdz galam jūsu datorā, un tas tiek sinhronizēts starp jūsu datoriem, izmantojot Keyrook kontu. Tas ir atvērtā koda, tāpēc ikviens var pārbaudīt, kā tas darbojas.
+
+AIZPILDE KATRĀ VIETNĒ
+• Viens klikšķis pieteikšanās laukā aizpilda pareizo kontu šai vietnei.
+• Saglabā jaunus pieteikšanās datus, kad pierakstāties, un atjaunina mainītos.
+• Aizpilda maksājumu kartes un adreses norēķinoties, tikai tur, kur izvēlaties.
+• Pierakstās ar passkeys vietnēs, kas tos piedāvā.
+• Darbojas arī rāmjos ievietotās veidlapās, kādas izmanto daudzu banku un veikalu pieteikšanās.
+• Īsinājumtaustiņš jebkurā brīdī atver jūsu seifu.
+
+STIPRS UN UNIKĀLS
+• Paroļu ģenerators: stipra un unikāla parole katram kontam.
+• Izvēlieties garumu un rakstzīmes un izslēdziet viegli sajaucamās rakstzīmes, piemēram, 0 un O.
+• Drošības pārbaude: atrod vājās un vairākkārt lietotās paroles un parāda, ko labot vispirms.
+
+SINHRONIZĀCIJA STARP JŪSU DATORIEM
+• Viens Keyrook konts, ar savu paroli vai ar Google vai GitHub.
+• Atbloķējiet ar Touch ID, Windows Hello, PIN kodu vai drošības atslēgu.
+• Šifrētas dublējumkopijas, ko glabājat paši.
+
+VIEGLI IENĀKT, VIEGLI IZIET
+• Importējiet pieteikšanās datus ar CSV failu no pārlūkprogrammas vai no lielākās daļas citu pārvaldnieku.
+• Eksportējiet tos jebkurā laikā kā CSV failu vai šifrētu dublējumkopiju. Jūsu dati paliek jūsu.
+
+PRIVĀTUMS PĒC DIZAINA
+• Zero-knowledge: viss tiek šifrēts ar AES-256-GCM jūsu datorā, pirms tas aizbrauc. Keyrook glabā to, ko sinhronizējat, un nevar to izlasīt.
+• Atslēga, kas atver jūsu seifu, nekad nenonāk pie Keyrook.
+• Bez reklāmām, izsekotājiem un analītikas.
+• Vietņu ikonas ir iebūvētas, tāpēc neviens serveris neuzzina, kur jums ir konti.
+• Konts tiek piedāvāts tikai savā vietnē, tāpēc viltota lapa neko nesaņem.
+• Lauki, ko nevarat redzēt, nekad netiek aizpildīti, un kartes aizpilda tikai drošās lapās.
+• Kopēta parole pēc neilga brīža tiek notīrīta no starpliktuves.
+• Atvērts kods: izlasiet kodu GitHub.
+
+VIENMĒR BEZ MAKSAS
+• Viss iepriekš minētais ir bez maksas, uz visiem laikiem un visiem. Maksas plāni tikai pievieno papildu funkcijas, un nekas no šī nekad nekļūs par maksas funkciju.
+
+ARĪ JŪSU SEIFĀ
+• Maksājumu kartes, adreses un slepenas piezīmes mapēs, ar pielāgotiem laukiem.
+• Miskaste, kas glabā dzēsto, un katra pieteikšanās agrākās versijas.
+• Bloķējas pati, kad atkāpjaties.
+
+Izveidoja Keyrook, Keyrook Authenticator veidotājs.

@@ -45,11 +45,15 @@ function show(value: string | number, locale: string): string {
   return typeof value === 'number' ? new Intl.NumberFormat(locale).format(value) : value;
 }
 
-/** A message with its values in, as text. Tags are dropped, their text kept. */
+/**
+ * A message with its values in, as text. The message's tags are dropped, their
+ * text kept — before the values go in, which are text as given: a login's or
+ * an account's name may hold what looks like a tag, and loses none of it.
+ */
 export function format(message: Message, locale: string, values?: Values): string {
   return pick(message, locale, values)
-    .replace(PLACEHOLDER, (whole, name: string) => (values && name in values ? show(values[name]!, locale) : whole))
-    .replace(TAG, '');
+    .replace(TAG, '')
+    .replace(PLACEHOLDER, (whole, name: string) => (values && name in values ? show(values[name]!, locale) : whole));
 }
 
 /** The placeholder names a message uses, in every one of its forms. */

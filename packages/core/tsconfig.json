@@ -6,7 +6,12 @@
     "emitDeclarationOnly": true,
     "declaration": true,
     "outDir": "./dist",
-    "rootDir": "./src"
+    // The repository's root, so the shared account code it uses (vendor/keyrook-account) is part of it.
+    "rootDir": "../..",
+    "baseUrl": ".",
+    "paths": {
+      "@keyrook/account": ["../../vendor/keyrook-account/src/index.ts"]
+    }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "../../vendor/keyrook-account/src/**/*.ts"]
 }

@@ -1,0 +1,43 @@
+Passhold er en adgangskodeadministrator, gratis for altid, der udfylder dine logins automatisk, gemmer dine passkeys og genererer stærke adgangskoder. Din boks er krypteret ende-til-ende på din computer og synkroniseres mellem dine computere via en Keyrook-konto. Den er open source, så alle kan se, hvordan den virker.
+
+UDFYLD AUTOMATISK PÅ ALLE WEBSTEDER
+• Ét klik i et loginfelt udfylder den rigtige konto til det websted.
+• Gemmer nye logins, når du logger ind, og opdaterer dem, du ændrer.
+• Udfylder kort og adresser ved kassen, kun der hvor du vælger det.
+• Logger dig ind med passkeys på de websteder, der tilbyder dem.
+• Virker i formularer inde i frames, sådan som mange bank- og webshop-logins er bygget.
+• En tastaturgenvej åbner din boks når som helst.
+
+STÆRK OG UNIK
+• Generator: en stærk, unik adgangskode til hver konto.
+• Vælg længde og tegn, og udelad tegn, der ligner hinanden, som 0 og O.
+• Sikkerhedstjek: finder svage og genbrugte adgangskoder og viser, hvad du skal rette først.
+
+SYNKRONISERET PÅ DINE COMPUTERE
+• Én Keyrook-konto, med sin egen adgangskode eller med Google eller GitHub.
+• Lås op med Touch ID, Windows Hello, en pinkode eller en sikkerhedsnøgle.
+• Krypterede sikkerhedskopier, som du selv gemmer.
+
+LET AT FLYTTE IND, LET AT FLYTTE UD
+• Importér dine logins med en CSV-fil, fra din browser eller de fleste andre administratorer.
+• Eksportér dem når som helst, som CSV-fil eller som krypteret sikkerhedskopi. Dine data forbliver dine.
+
+PRIVAT FRA START
+• Zero-knowledge: alt krypteres med AES-256-GCM på din computer, før det forlader den. Keyrook gemmer det, du synkroniserer, og kan ikke læse det.
+• Nøglen til din boks når aldrig Keyrook.
+• Ingen annoncer, ingen trackere, ingen analyser.
+• Websteds-ikoner er indbygget, så ingen server får at vide, hvor du har konti.
+• En konto tilbydes kun på sit eget websted, så en falsk side får intet.
+• Felter, du ikke kan se, udfyldes aldrig, og kort udfyldes kun på sikre sider.
+• En kopieret adgangskode ryddes fra udklipsholderen efter kort tid.
+• Open source: læs koden på GitHub.
+
+GRATIS FOR ALTID
+• Alt ovenfor er gratis, for altid, for alle. Betalte abonnementer lægger kun ekstra funktioner oveni, og intet af dette bliver nogensinde betalt.
+
+OGSÅ I DIN BOKS
+• Betalingskort, adresser og sikre noter, i mapper, med egne felter.
+• En papirkurv, der gemmer det, du sletter, og hver tidligere version af et login.
+• Låser sig selv, når du går væk.
+
+Fra Keyrook, makeren af Keyrook Authenticator.

@@ -4,18 +4,21 @@ import { send, type PendingView, type PromptOutcome } from '../lib/messaging.js'
 import { useAction } from '../ui/hooks.js';
 import { CheckIcon, CloseIcon, PassholdMark } from '../ui/icons.js';
 import { Button } from '../ui/primitives.js';
+import { pendingWords } from '../ui/pending.js';
 import { useVisible } from '../ui/useVisible.js';
 
 /**
  * "Save login to Passhold?" in the corner of the page, after a sign-in was
- * sent. It shows the username and the site, never the password.
+ * sent — or "Save card to Passhold?" after a checkout. It shows the username
+ * and the site, or the card by its last digits, never a password, a card's
+ * number or its code.
  */
 export function PromptApp({ token }: { token: string }) {
   const t = useT();
   const [view, setView] = useState<PendingView | null | undefined>(undefined);
   const [outcome, setOutcome] = useState<PromptOutcome | null>(null);
   const { error, run } = useAction();
-  const { ref, visible } = useVisible<HTMLDivElement>();
+  const { ref, visible, act } = useVisible<HTMLDivElement>(view);
 
   useEffect(() => {
     void run(async () => {
@@ -30,6 +33,7 @@ export function PromptApp({ token }: { token: string }) {
     void run(async () => setOutcome((await send({ type: 'prompt/answer', token, answer: choice })).outcome));
 
   if (!view) return <div ref={ref} className="h-screen" />;
+  const words = pendingWords(view, t, 'prompt');
 
   return (
     <div
@@ -39,17 +43,9 @@ export function PromptApp({ token }: { token: string }) {
       <div className="flex items-start gap-2">
         <PassholdMark size={24} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <p className="text-[14px] font-semibold">
-            {outcome === 'saved'
-              ? t('prompt.saved')
-              : view.kind === 'update'
-                ? t('prompt.update')
-                : view.kind === null
-                  ? t('pending.lockedTitle')
-                  : t('prompt.save')}
-          </p>
-          <p className="truncate text-[13px] text-neutral-600 dark:text-neutral-400">
-            {view.username ? t('pending.body', { username: view.username, site: view.site }) : t('pending.bodyNoUser', { site: view.site })}
+          <p className="text-[14px] font-semibold">{outcome === 'saved' ? t('prompt.saved') : words.title}</p>
+          <p className="truncate text-[13px] text-neutral-600 dark:text-neutral-400" data-testid="prompt-body">
+            {words.body}
           </p>
         </div>
         <Button size="sm" variant="ghost" aria-label={t('common.close')} title={t('common.close')} onClick={() => answer('dismiss')}>
@@ -65,11 +61,11 @@ export function PromptApp({ token }: { token: string }) {
         <p className="text-[13px] leading-snug text-neutral-700 dark:text-neutral-300">{t('prompt.locked')}</p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" variant="primary" disabled={!visible} onClick={() => answer('save')}>
-            {view.kind === 'update' ? t('prompt.updateButton') : t('prompt.saveButton')}
+          <Button size="sm" variant="primary" {...act(() => answer('save'))}>
+            {words.save}
           </Button>
-          <Button size="sm" variant="ghost" disabled={!visible} onClick={() => answer('never')}>
-            {t('prompt.never')}
+          <Button size="sm" variant="ghost" {...act(() => answer(words.never ? 'never' : 'dismiss'))}>
+            {words.never ? t('prompt.never') : t('common.notNow')}
           </Button>
         </div>
       )}

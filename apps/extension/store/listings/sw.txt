@@ -1,0 +1,43 @@
+Passhold ni password manager ya bure milele: hujaza nywila zako, hushika passkeys zako na kutengeneza nywila imara. Nywila zako zimesimbwa kwa njia fiche kwenye kompyuta yako, na zinasawazishwa kati ya kompyuta zako kupitia akaunti ya Keyrook. Ni chanzo huria, kwa hiyo mtu yeyote anaweza kuangalia jinsi kinavyofanya kazi.
+
+KUJAZA KIOTOMATIKI KWENYE KILA TOVUTI
+• Bofya mara moja kwenye sehemu ya kuingia ili ujaze akaunti sahihi ya tovuti hiyo.
+• Huhifadhi akaunti mpya unapoingia, na husasisha zile unazobadilisha.
+• Hujaza kadi na anwani wakati wa kulipia, hapo tu unapochagua.
+• Hukuingiza kwa passkeys kwenye tovuti zinazozitoa.
+• Hufanya kazi kwenye fomu zilizo ndani ya fremu, kama zinavyojengwa kuingia kwenye benki na maduka mengi.
+• Njia ya mkato ya kibodi hufungua hifadhi yako wakati wowote.
+
+IMARA NA ZA KIPEKEE
+• Kizalishi cha nywila: nywila imara na ya kipekee kwa kila akaunti.
+• Chagua urefu na herufi, na uondoe herufi zinazofanana sana kama 0 na O.
+• Ukaguzi wa usalama: hutafuta nywila dhaifu na zilizorudiwa, na kuonyesha kipi kurekebisha kwanza.
+
+USAWAZISHAJI KATI YA KOMPYUTA ZAKO
+• Akaunti moja ya Keyrook, yenye nenosiri lake, au kwa Google au GitHub.
+• Fungua kwa Touch ID, Windows Hello, PIN au ufunguo wa usalama.
+• Nakala rudufu zilizosimbwa kwa njia fiche unazozihifadhi mwenyewe.
+
+KUINGIA KWA URAHISI, KUTOKA KWA URAHISI
+• Ingiza akaunti zako kwa faili la CSV, kutoka kwenye kivinjari chako au kutoka kwa wasimamizi wengine wengi.
+• Hamisha akaunti zako wakati wowote, kama faili la CSV au nakala rudufu iliyosimbwa. Data yako inabaki yako.
+
+FARAGHA TANGU MWANZO
+• Zero-knowledge: kila kitu husimbwa kwa AES-256-GCM kwenye kompyuta yako kabla ya kuondoka. Keyrook huhifadhi unachosawazisha, lakini haiwezi kukisoma.
+• Ufunguo unaofungua hifadhi yako haufikii Keyrook kamwe.
+• Hakuna matangazo, wafuatiliaji wala uchanganuzi.
+• Aikoni za tovuti zimejengwa ndani, kwa hiyo hakuna seva inayojua una akaunti wapi.
+• Akaunti hutolewa kwenye tovuti yake pekee, kwa hiyo ukurasa wa kuiga haupati chochote.
+• Sehemu usizoziona hazijazwi kamwe, na kadi hujazwa kwenye kurasa salama pekee.
+• Nywila iliyonakiliwa hufutwa kwenye ubao wa kunakili baada ya muda mfupi.
+• Chanzo huria: soma msimbo kwenye GitHub.
+
+BURE MILELE
+• Kila kilichotajwa hapo juu ni bure, milele, kwa kila mtu. Mipango ya kulipia inaongeza vipengele vya ziada tu, na hakuna chochote hapa kitakachowahi kuhitaji malipo.
+
+PIA KATIKA HIFADHI YAKO
+• Kadi za malipo, anwani na vidokezo salama, katika folda, pamoja na sehemu maalum.
+• Pipa la taka linalohifadhi kile ulichofuta, na kila toleo la awali la akaunti ya kuingia.
+• Hujifunga yenyewe unapoondoka.
+
+Imetengenezwa na Keyrook, watengenezaji wa Keyrook Authenticator.

@@ -1,0 +1,43 @@
+Passhold er en passordbehandler, gratis for alltid, som fyller ut innloggingene dine automatisk, tar vare på passkeys og lager sterke passord. Hvelvet ditt er ende-til-ende-kryptert på datamaskinen din og synkroniseres mellom datamaskinene dine med en Keyrook-konto. Den er åpen kildekode, så alle kan sjekke hvordan den fungerer.
+
+FYLL UT AUTOMATISK PÅ ALLE NETTSTEDER
+• Ett klikk i et innloggingsfelt fyller inn riktig konto for nettstedet.
+• Lagrer nye innlogginger når du logger inn, og oppdaterer dem du endrer.
+• Fyller ut kort og adresser i kassen, bare der du velger det.
+• Logger deg inn med passkeys på nettstedene som tilbyr dem.
+• Fungerer i skjemaer inne i rammer, slik mange bank- og nettbutikkinnlogginger er laget.
+• En hurtigtast åpner hvelvet ditt når som helst.
+
+STERKT OG UNIKT
+• Passordgenerator: et sterkt, unikt passord for hver konto.
+• Velg lengde og tegn, og utelat tegn som ligner på hverandre, som 0 og O.
+• Sikkerhetssjekk: finner svake og gjenbrukte passord, og viser hva du bør fikse først.
+
+SYNKRONISERT PÅ DATAMASKINENE DINE
+• Én Keyrook-konto, med eget passord eller med Google eller GitHub.
+• Lås opp med Touch ID, Windows Hello, en PIN-kode eller en sikkerhetsnøkkel.
+• Krypterte sikkerhetskopier som du selv oppbevarer.
+
+LETT Å FLYTTE INN, LETT Å FLYTTE UT
+• Importer innloggingene dine med en CSV-fil, fra nettleseren din eller de fleste andre behandlere.
+• Eksporter dem når som helst, som CSV-fil eller som kryptert sikkerhetskopi. Dataene dine forblir dine.
+
+PRIVAT FRA BEGYNNELSEN
+• Zero-knowledge: alt krypteres med AES-256-GCM på datamaskinen din før det forlater den. Keyrook lagrer det du synkroniserer, og kan ikke lese det.
+• Nøkkelen som åpner hvelvet ditt, når aldri Keyrook.
+• Ingen annonser, ingen sporere, ingen analyse.
+• Nettstedsikoner er innebygd, så ingen server får vite hvor du har kontoer.
+• En konto tilbys bare på sitt eget nettsted, så en etterligning får ingenting.
+• Felt du ikke ser, blir aldri fylt ut, og kort fylles bare ut på sikre sider.
+• Et kopiert passord blir fjernet fra utklippstavlen etter kort tid.
+• Åpen kildekode: les koden på GitHub.
+
+GRATIS FOR ALLTID
+• Alt over er gratis, for godt, for alle. Betalte abonnementer legger bare til ekstra funksjoner, og ingenting av dette blir noen gang betalt.
+
+OGSÅ I HVELVET DITT
+• Betalingskort, adresser og sikre notater, i mapper, med egne felt.
+• En papirkurv som beholder det du sletter, og hver tidligere versjon av en innlogging.
+• Låser seg selv når du går fra den.
+
+Fra Keyrook, produsenten av Keyrook Authenticator.

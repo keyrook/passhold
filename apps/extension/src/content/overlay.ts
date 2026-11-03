@@ -1,6 +1,7 @@
 /**
  * What Passhold draws on a web page: the button in a sign-in field, the list
- * that opens from it, and the save prompt.
+ * that opens from it, the save prompt, and the frame where a site's passkey
+ * is saved or chosen.
  *
  * Each sits in a closed shadow root, so the page's styles do not reach in and
  * its scripts cannot walk into the button. The list and the prompt are not
@@ -9,6 +10,7 @@
  * this script, or through the page.
  */
 import { markElements, PASSHOLD_MARK_COMPACT } from '@keyrook/brand';
+import { FRAME_MOVED } from '../lib/messaging.js';
 
 const Z = '2147483647';
 const BUTTON = 22;
@@ -42,14 +44,20 @@ function follow(field: HTMLElement, place: (rect: DOMRect) => void): () => void 
 }
 
 export class FieldButton {
-  private readonly element: HTMLElement;
-  private readonly button: HTMLButtonElement;
+  /**
+   * Drawn the first time a sign-in field needs it, never before: a page with
+   * no sign-in field gets nothing of Passhold's in its document. Anti-bot
+   * checks, Cloudflare's among them, fail on an element they did not put there.
+   */
+  private drawn: { element: HTMLElement; button: HTMLButtonElement } | null = null;
   private stop: (() => void) | null = null;
   field: HTMLInputElement | null = null;
 
-  constructor(onPress: (field: HTMLInputElement) => void) {
+  constructor(private readonly onPress: (field: HTMLInputElement) => void) {}
+
+  private draw(): { element: HTMLElement; button: HTMLButtonElement } {
+    if (this.drawn) return this.drawn;
     const { element, root } = host();
-    this.element = element;
     root.innerHTML = `<style>
       button { all: initial; position: fixed; width: ${BUTTON}px; height: ${BUTTON}px; display: none;
         cursor: pointer; border-radius: 6px; padding: 2px; box-sizing: border-box; background: transparent; }
@@ -57,23 +65,26 @@ export class FieldButton {
       button:focus-visible { outline: 2px solid #3A6FDB; outline-offset: 1px; }
       svg { width: 100%; height: 100%; display: block; }
     </style><button type="button" tabindex="-1"><svg viewBox="0 0 100 100" aria-hidden="true">${markElements(PASSHOLD_MARK_COMPACT)}</svg></button>`;
-    this.button = root.querySelector('button')!;
-    this.button.setAttribute('aria-label', 'Passhold');
+    const button = root.querySelector('button')!;
+    button.setAttribute('aria-label', 'Passhold');
     // Pressing the button must not take focus from the field it serves.
-    this.button.addEventListener('mousedown', (event) => event.preventDefault());
-    this.button.addEventListener('click', (event) => {
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (this.field) onPress(this.field);
+      if (this.field) this.onPress(this.field);
     });
+    this.drawn = { element, button };
+    return this.drawn;
   }
 
   show(field: HTMLInputElement): void {
     if (this.field === field) return;
     this.hide();
     this.field = field;
+    const { button } = this.draw();
     this.stop = follow(field, (rect) => {
-      const style = this.button.style;
+      const style = button.style;
       if (rect.width < BUTTON * 2 || rect.bottom < 0 || rect.top > innerHeight) {
         style.display = 'none';
         return;
@@ -90,11 +101,11 @@ export class FieldButton {
     this.stop?.();
     this.stop = null;
     this.field = null;
-    this.button.style.display = 'none';
+    if (this.drawn) this.drawn.button.style.display = 'none';
   }
 
   contains(node: EventTarget | null): boolean {
-    return node === this.element;
+    return node !== null && node === this.drawn?.element;
   }
 }
 
@@ -103,8 +114,10 @@ export class Frame {
   private readonly element: HTMLElement;
   private readonly frame: HTMLIFrameElement;
   private stop: (() => void) | null = null;
+  /** Where it was last put, to tell the page inside when that changes. */
+  private at = '';
 
-  constructor(page: 'menu.html' | 'prompt.html', token: string, size: { width: number; height: number }) {
+  constructor(page: 'menu.html' | 'prompt.html' | 'passkey.html', token: string, size: { width: number; height: number }) {
     const { element, root } = host();
     this.element = element;
     this.frame = document.createElement('iframe');
@@ -130,20 +143,52 @@ export class Frame {
 
   /** Under the field, or above it where there is no room below. */
   besideField(field: HTMLElement): void {
-    this.stop = follow(field, (rect) => {
-      const height = this.frame.offsetHeight;
-      const width = this.frame.offsetWidth;
-      const below = rect.bottom + 4;
-      const top = below + height > innerHeight && rect.top - height - 4 > 0 ? rect.top - height - 4 : below;
-      const left = Math.min(Math.max(8, rect.left), Math.max(8, innerWidth - width - 8));
-      this.frame.style.top = `${top}px`;
-      this.frame.style.left = `${left}px`;
+    this.stop = follow(field, (rect) => this.place(rect));
+  }
+
+  /**
+   * Under a field in a frame of this page too small to hold the list, as if
+   * drawn there: `field` is the field's place in that frame, kept to the
+   * frame's own box, so the frame cannot have the list put anywhere else on
+   * the page.
+   */
+  besideFieldIn(frame: HTMLIFrameElement, field: { left: number; top: number; bottom: number }): void {
+    this.stop = follow(frame, (rect) => {
+      const x = rect.left + frame.clientLeft;
+      const y = rect.top + frame.clientTop;
+      const within = (value: number, size: number) => Math.min(Math.max(value, 0), size);
+      const top = y + within(field.top, frame.clientHeight);
+      const bottom = y + within(field.bottom, frame.clientHeight);
+      this.place({ left: x + within(field.left, frame.clientWidth), top, bottom });
     });
+  }
+
+  private place(rect: { left: number; top: number; bottom: number }): void {
+    const height = this.frame.offsetHeight;
+    const width = this.frame.offsetWidth;
+    const below = rect.bottom + 4;
+    const top = below + height > innerHeight && rect.top - height - 4 > 0 ? rect.top - height - 4 : below;
+    const left = Math.min(Math.max(8, rect.left), Math.max(8, innerWidth - width - 8));
+    this.frame.style.top = `${top}px`;
+    this.frame.style.left = `${left}px`;
+    const at = `${top},${left}`;
+    // Moved — the page scrolled, or moved or resized the field — under a
+    // pointer that may not have moved: the page inside waits again before a
+    // click counts (ui/useVisible.ts). To any origin: the frame's address is
+    // the dynamic one (use_dynamic_url), not the origin its page runs in, and
+    // all the word can do anywhere is make a click wait.
+    if (this.at && at !== this.at) this.frame.contentWindow?.postMessage({ source: FRAME_MOVED }, '*');
+    this.at = at;
   }
 
   inCorner(): void {
     this.frame.style.top = '12px';
     this.frame.style.right = '12px';
+  }
+
+  /** The height the page inside measured for its card: the frame covers no more of the page than that. */
+  resize(height: number): void {
+    this.frame.style.height = `${height}px`;
   }
 
   contains(node: EventTarget | null): boolean {

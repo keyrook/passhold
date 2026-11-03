@@ -1,0 +1,43 @@
+Passhold este un manager de parole, gratuit pe veci, care completează automat autentificările, păstrează cheile dvs. de acces și generează parole puternice. Seiful dvs. este criptat cap-coadă pe computerul dvs. și se sincronizează între computerele dvs. printr-un cont Keyrook. Are cod sursă deschis, ca oricine să poată verifica felul în care funcționează.
+
+COMPLETARE AUTOMATĂ PE ORICARE SITE
+• Un clic într-un câmp de conectare completează contul potrivit pentru acel site.
+• Salvează autentificările noi când vă conectați și le actualizează pe cele pe care le schimbați.
+• Completează cardurile și adresele la plată, doar acolo unde alegeți dvs.
+• Vă conectează cu chei de acces pe site-urile care le oferă.
+• Funcționează în formularele din cadre, cum sunt construite multe conectări la bănci și magazine.
+• O combinație de taste vă deschide seiful oricând.
+
+PUTERNICE ȘI UNICE
+• Generator de parole: o parolă puternică și unică pentru fiecare cont.
+• Alegeți lungimea și caracterele și lăsați deoparte caracterele care se aseamănă, precum 0 și O.
+• Verificare de securitate: găsește parolele slabe sau refolosite și arată ce să reparați mai întâi.
+
+SINCRONIZAT PE COMPUTERELE DVS.
+• Un cont Keyrook, cu parola lui proprie sau cu Google ori GitHub.
+• Deblocare cu Touch ID, Windows Hello, un PIN sau o cheie de securitate.
+• Copii de rezervă criptate, pe care le păstrați dvs.
+
+UȘOR DE INTRAT, UȘOR DE PLECAT
+• Importați autentificările cu un fișier CSV, din browser sau de la majoritatea celorlalte managere.
+• Exportați-le oricând, ca fișier CSV sau copie de rezervă criptată. Datele dvs. rămân ale dvs.
+
+PRIVAT DIN PRINCIPIU
+• Zero-knowledge: totul este criptat cu AES-256-GCM pe computerul dvs. înainte să plece de acolo. Keyrook stochează ce sincronizați, dar nu îl poate citi.
+• Cheia care deschide seiful dvs. nu ajunge niciodată la Keyrook.
+• Fără reclame, fără trackere, fără analize.
+• Pictogramele site-urilor sunt integrate: niciun server nu află unde aveți conturi.
+• O autentificare se oferă doar pe site-ul ei, deci o pagină falsă nu primește nimic.
+• Câmpurile pe care nu le vedeți nu se completează niciodată, iar cardurile doar pe pagini sigure.
+• O parolă copiată se șterge din clipboard după puțin timp.
+• Cod sursă deschis: citiți codul pe GitHub.
+
+GRATUIT PE VECI
+• Tot ce este de mai sus este gratuit, pe veci, pentru toată lumea. Planurile cu plată doar adaugă funcții în plus, iar nimic din toate acestea nu va deveni vreodată cu plată.
+
+ȘI ÎN SEIFUL DVS.
+• Carduri de plată, adrese și notițe securizate, în foldere, cu câmpuri proprii.
+• Un coș de gunoi care păstrează ce ștergeți și fiecare versiune anterioară a unei autentificări.
+• Se blochează singur când vă îndepărtați.
+
+Făcut de Keyrook, creatorul lui Keyrook Authenticator.

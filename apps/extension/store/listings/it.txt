@@ -1,0 +1,43 @@
+Passhold è un gestore di password gratuito per sempre, che compila automaticamente i tuoi login, conserva le tue passkey e genera password sicure. La tua cassaforte è crittografata end-to-end sul tuo computer e si sincronizza tra i tuoi computer con un account Keyrook. È open source, quindi chiunque può verificare come funziona.
+
+COMPILAZIONE AUTOMATICA SU OGNI SITO
+• Un clic in un campo di accesso compila l’account giusto per quel sito.
+• Salva i nuovi login mentre accedi e aggiorna quelli che cambi.
+• Compila carte e indirizzi al checkout, solo dove scegli tu.
+• Ti fa accedere con le passkey sui siti che le offrono.
+• Funziona nei moduli dentro i frame, come sono costruiti molti accessi di banche e negozi.
+• Una scorciatoia da tastiera apre la tua cassaforte in ogni momento.
+
+FORTI E UNICHE
+• Generatore di password: una password forte e unica per ogni account.
+• Scegli lunghezza e caratteri, ed escludi quelli che si confondono, come 0 e O.
+• Controllo di sicurezza: trova le password deboli e riutilizzate, e mostra da cosa iniziare.
+
+SINCRONIZZATO TRA I TUOI COMPUTER
+• Un account Keyrook, con una password propria oppure con Google o GitHub.
+• Sblocco con Touch ID, Windows Hello, un PIN o una chiave di sicurezza.
+• Backup crittografati che conservi tu.
+
+FACILE ENTRARE, FACILE USCIRE
+• Importa i tuoi login con un file CSV, dal browser o dalla maggior parte degli altri gestori.
+• Esportali in qualsiasi momento, come file CSV o backup crittografato. I tuoi dati restano tuoi.
+
+PRIVATO PER PROGETTO
+• Zero-knowledge: tutto è crittografato con AES-256-GCM sul tuo computer prima di uscirne. Keyrook conserva ciò che sincronizzi, ma non può leggerlo.
+• La chiave che apre la tua cassaforte non arriva mai a Keyrook.
+• Niente pubblicità, niente tracker, niente analytics.
+• Le icone dei siti sono integrate: nessun server sa dove hai degli account.
+• Un account viene proposto solo sul suo sito, quindi una pagina contraffatta non riceve nulla.
+• I campi che non vedi non vengono mai compilati, e le carte solo su pagine sicure.
+• Una password copiata viene cancellata dagli appunti dopo poco tempo.
+• Open source: leggi il codice su GitHub.
+
+GRATUITO PER SEMPRE
+• Tutto quanto sopra è gratuito, per sempre, per tutti. I piani a pagamento aggiungono solo funzioni in più, e nulla di tutto questo diventerà mai a pagamento.
+
+ANCHE NELLA TUA CASSAFORTE
+• Carte di pagamento, indirizzi e note sicure, in cartelle, con campi personalizzati.
+• Un cestino che conserva ciò che elimini, e ogni versione precedente di un login.
+• Si blocca da solo quando ti allontani.
+
+Realizzato da Keyrook, il creatore di Keyrook Authenticator.

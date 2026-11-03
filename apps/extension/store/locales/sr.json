@@ -1,0 +1,5 @@
+{
+  "appName": "Менаџер лозинки - Passhold",
+  "appDescription": "Менаџер лозинки, бесплатан заувек: autofill, passkeys, генератор. End-to-end шифровано, отворен код, sync између рачунара.",
+  "commandOpen": "Отвори Passhold"
+}

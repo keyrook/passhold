@@ -1,0 +1,43 @@
+Passhold est un gestionnaire de mots de passe, gratuit pour toujours, qui remplit vos connexions automatiquement, garde vos clés d’accès et génère des mots de passe forts. Votre coffre-fort est chiffré de bout en bout sur votre ordinateur et se synchronise entre vos ordinateurs grâce à un compte Keyrook. Le code est open source, pour que chacun puisse vérifier son fonctionnement.
+
+REMPLISSAGE AUTOMATIQUE SUR CHAQUE SITE
+• Un clic dans un champ de connexion remplit le bon compte pour ce site.
+• Enregistre les nouvelles connexions à la saisie, et met à jour celles que vous modifiez.
+• Remplit les cartes et les adresses au moment de payer, uniquement là où vous le choisissez.
+• Vous connecte avec vos clés d’accès sur les sites qui les proposent.
+• Fonctionne dans les formulaires placés dans des cadres, comme le sont beaucoup de connexions de banques et de boutiques.
+• Un raccourci clavier ouvre votre coffre-fort à tout moment.
+
+FORT ET UNIQUE
+• Générateur de mots de passe : un mot de passe fort et unique pour chaque compte.
+• Choisissez la longueur et les caractères, et écartez les caractères qui se ressemblent, comme 0 et O.
+• Vérification de sécurité : repère les mots de passe faibles ou réutilisés, et montre ce qu’il faut corriger en premier.
+
+SYNCHRONISÉ ENTRE VOS ORDINATEURS
+• Un compte Keyrook, avec son propre mot de passe ou avec Google ou GitHub.
+• Déverrouillage avec Touch ID, Windows Hello, un code PIN ou une clé de sécurité.
+• Sauvegardes chiffrées que vous gardez vous-même.
+
+SIMPLE À REJOINDRE, SIMPLE À QUITTER
+• Importez vos connexions avec un fichier CSV, depuis votre navigateur ou depuis la plupart des autres gestionnaires.
+• Exportez-les à tout moment, en fichier CSV ou en sauvegarde chiffrée. Vos données restent les vôtres.
+
+CONFIDENTIEL PAR CONCEPTION
+• Zéro connaissance : tout est chiffré avec AES-256-GCM sur votre ordinateur avant de le quitter. Keyrook stocke ce que vous synchronisez, sans pouvoir le lire.
+• La clé qui ouvre votre coffre-fort n’atteint jamais Keyrook.
+• Pas de publicité, pas de traceurs, pas d’analyses.
+• Les icônes des sites sont intégrées : aucun serveur ne sait où vous avez des comptes.
+• Un compte n’est proposé que sur son propre site, donc une page imitée ne reçoit rien.
+• Les champs que vous ne voyez pas ne sont jamais remplis, et les cartes ne le sont que sur des pages sécurisées.
+• Un mot de passe copié est effacé du presse-papiers après un court moment.
+• Open source : lisez le code sur GitHub.
+
+GRATUIT POUR TOUJOURS
+• Tout ce qui précède est gratuit, pour toujours, pour tout le monde. Les offres payantes ajoutent seulement des extras, et rien de tout cela ne deviendra jamais payant.
+
+AUSSI DANS VOTRE COFFRE-FORT
+• Cartes de paiement, adresses et notes sécurisées, classées dans des dossiers, avec des champs personnalisés.
+• Une corbeille qui garde ce que vous supprimez, et chaque version précédente d’une connexion.
+• Se verrouille tout seul quand vous vous éloignez.
+
+Créé par Keyrook, le créateur de Keyrook Authenticator.

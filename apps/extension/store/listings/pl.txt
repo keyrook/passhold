@@ -1,0 +1,43 @@
+Passhold to menedżer haseł, za darmo na zawsze: uzupełnia twoje logowania, przechowuje klucze dostępu i generuje mocne hasła. Twój sejf jest szyfrowany end-to-end na twoim komputerze i synchronizuje się między komputerami przez konto Keyrook. Kod jest otwarty, więc każdy może sprawdzić, jak to działa.
+
+UZUPEŁNIANIE NA KAŻDEJ STRONIE
+• Jedno kliknięcie w polu logowania uzupełnia właściwe konto dla tej strony.
+• Zapisuje nowe logowania podczas logowania i aktualizuje te, które zmienisz.
+• Uzupełnia karty i adresy przy płatności, tylko tam, gdzie wybierzesz.
+• Loguje cię kluczami dostępu na stronach, które je oferują.
+• Działa w formularzach wewnątrz ramek, tak jak wiele logowań w bankach i sklepach.
+• Skrót klawiszowy otwiera twój sejf w każdej chwili.
+
+MOCNE I UNIKALNE
+• Generator haseł: mocne, unikalne hasło dla każdego konta.
+• Wybierz długość i znaki, a podobne znaki, jak 0 i O, pomiń.
+• Sprawdzanie bezpieczeństwa: znajduje słabe i powtarzające się hasła i pokazuje, co poprawić najpierw.
+
+SYNCHRONIZACJA MIĘDZY KOMPUTERAMI
+• Jedno konto Keyrook, z własnym hasłem albo przez Google lub GitHub.
+• Odblokowanie przez Touch ID, Windows Hello, kod PIN lub klucz zabezpieczający.
+• Szyfrowane kopie zapasowe, które przechowujesz sam.
+
+ŁATWO WEJŚĆ, ŁATWO WYJŚĆ
+• Importuj logowania z pliku CSV, z przeglądarki lub z większości innych menedżerów.
+• Eksportuj je w każdej chwili, jako plik CSV albo szyfrowaną kopię zapasową. Twoje dane zostają twoje.
+
+PRYWATNE OD ZAŁOŻENIA
+• Zero-knowledge: wszystko jest szyfrowane algorytmem AES-256-GCM na twoim komputerze, zanim go opuści. Keyrook przechowuje to, co synchronizujesz, i nie może tego odczytać.
+• Klucz, który otwiera twój sejf, nigdy nie trafia do Keyrook.
+• Bez reklam, bez trackerów, bez analityki.
+• Ikony stron są wbudowane, więc żaden serwer nie dowiaduje się, gdzie masz konta.
+• Logowanie jest proponowane tylko na własnej stronie, więc fałszywa strona nic nie dostaje.
+• Pola, których nie widać, nigdy nie są uzupełniane, a karty tylko na bezpiecznych stronach.
+• Skopiowane hasło po krótkiej chwili znika ze schowka.
+• Otwarte źródło: przeczytaj kod na GitHub.
+
+ZA DARMO NA ZAWSZE
+• Wszystko powyżej jest bezpłatne, na zawsze, dla wszystkich. Płatne plany tylko dodają funkcje, a nic z powyższego nigdy nie stanie się płatne.
+
+TAKŻE W TWOIM SEJFIE
+• Karty płatnicze, adresy i bezpieczne notatki, w folderach, z własnymi polami.
+• Kosz, który przechowuje to, co usuniesz, i każdą wcześniejszą wersję logowania.
+• Blokuje się sam, gdy odejdziesz od komputera.
+
+Passhold tworzy Keyrook, wydawca Keyrook Authenticator.

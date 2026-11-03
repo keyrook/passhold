@@ -1,0 +1,43 @@
+A Passhold jelszókezelő, amely örökre ingyenes: kitölti a bejelentkezéseit, megőrzi a hozzáférési kulcsait, és erős jelszavakat hoz létre. A jelszavait a számítógépén titkosítja, és a Keyrook-fiókjával minden számítógépe között szinkronizálja. Nyílt forráskódú, így bárki ellenőrizheti, hogyan működik.
+
+AUTOMATIKUS KITÖLTÉS MINDEN OLDALON
+• Egy kattintás a bejelentkezési mezőben kitölti az adott oldalhoz tartozó fiókot.
+• Az új bejelentkezéseket a belépéskor menti, a megváltoztatottakat pedig frissíti.
+• A kártyákat és címeket a fizetésnél tölti ki, csak ott, ahol ön választja.
+• Hozzáférési kulccsal jelentkeztet be azokon az oldalakon, amelyek ezt kínálják.
+• Keretekben lévő űrlapokban is működik, ahogy sok bank és bolt bejelentkezése készült.
+• Billentyűparanccsal bármikor megnyitja a széfet.
+
+ERŐS ÉS EGYEDI
+• Jelszógenerátor: erős, egyedi jelszó minden fiókhoz.
+• Válassza meg a hosszát és a karaktereket, és hagyja ki az olyan hasonló karaktereket, mint a 0 és az O.
+• Biztonsági ellenőrzés: megtalálja a gyenge és többször használt jelszavakat, és megmutatja, mit érdemes először javítani.
+
+SZINKRONIZÁLVA MINDEN SZÁMÍTÓGÉPÉN
+• Egy Keyrook-fiók, saját jelszóval, vagy Google-lel vagy GitHubbal.
+• Feloldás Touch ID-val vagy Windows Hello-val, PIN-kóddal vagy biztonsági kulccsal.
+• Titkosított biztonsági mentések, amelyeket ön őriz meg.
+
+KÖNNYEN ÁTKÖLTÖZNI, KÖNNYEN KILÉPNI
+• Importálja a bejelentkezéseit CSV-fájllal: böngészőből vagy a legtöbb más jelszókezelőből.
+• Bármikor exportálhatja őket CSV-fájlként vagy titkosított biztonsági mentésként. Az adatai az Öné maradnak.
+
+MAGÁNJELLEGŰ A TERVEZÉSE
+• Zero-knowledge: minden AES-256-GCM szerint titkosul a számítógépén, mielőtt elhagyná. A Keyrook tárolja, amit szinkronizál, de nem tudja elolvasni.
+• A széfet nyitó kulcs soha nem jut el a Keyrookhoz.
+• Nincs hirdetés, nincs követés, nincs elemzés.
+• Az oldalikonok be vannak építve, így egyetlen szerver sem tudja meg, hol van fiókja.
+• Bejelentkezés csak a saját oldalán ajánlódik fel, így egy megtévesztő oldal semmit nem kap.
+• A nem látható mezők soha nem töltődnek ki, a kártyák pedig csak biztonságos oldalakon.
+• A másolt jelszó rövid idő után törlődik a vágólapról.
+• Nyílt forráskód: olvassa a kódot a GitHubon.
+
+ÖRÖKRE INGYENES
+• Mindez ingyenes, örökre, mindenki számára. A fizetős csomagok csak extrákat adnak hozzá, és ebből soha semmi nem lesz fizetős.
+
+A SZÉFBEN IS
+• Fizetőkártyák, címek és biztonságos jegyzetek mappákban, egyéni mezőkkel.
+• Kuka, amely megőrzi a törölt elemeket, és minden bejelentkezés korábbi jelszavait.
+• Zárolja magát, amikor otthagyja a számítógépet.
+
+Készítette a Keyrook, a Keyrook Authenticator készítője.
