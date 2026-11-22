@@ -1,10 +1,9 @@
 /**
- * The roster: who is in the organisation, as every device believes it.
- * Each line says whose member key is whose, who is an
- * organiser, and whether the join code was compared. Its MAC is under a key
- * from the organisation key, which the server never holds, so the server can
- * neither add a line nor drop one, nor change a key or a role, without every
- * device refusing the list.
+ * The roster: who is in the organisation, as every device believes it. Each
+ * line says whose member key is whose, who is an organiser, and whether the
+ * join code was compared. Its MAC is under a key from the organisation key,
+ * which the server never holds, so the server can neither add a line nor drop
+ * one, nor change a key or a role, without every device refusing the list.
  *
  * A MAC, not a signature: every member holds the organisation key, so a
  * member could make a roster too. That stops the server, not someone in the

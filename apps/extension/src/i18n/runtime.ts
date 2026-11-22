@@ -70,8 +70,14 @@ async function storedPreference(): Promise<LanguagePreference> {
   }
 }
 
-/** Before the first render, so nothing paints in one language and then flips. */
-export async function startI18n(): Promise<void> {
+/**
+ * Before the first render, so nothing paints in one language and then flips.
+ * `fixed`: a page that keeps no choice of its own — the web vault, which
+ * keeps nothing in the browser's storage — shows that language, whatever the
+ * extension's storage says.
+ */
+export async function startI18n(fixed?: LanguagePreference): Promise<void> {
+  if (fixed) return apply(fixed);
   await apply(await storedPreference());
   // A change made in Settings reaches an open popup too, and the reverse.
   chrome.storage.onChanged?.addListener((changes, area) => {

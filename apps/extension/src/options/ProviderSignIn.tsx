@@ -3,6 +3,7 @@ import { accountPasskeySalt, randomBytes, toBase64, type SignInProvider } from '
 import { useT } from '../i18n/react.js';
 import type { MessageKey } from '../i18n/locales/en.js';
 import { send, type JoinProgress, type PairingView, type ProviderView } from '../lib/messaging.js';
+import { isFirefox } from '../lib/platform.js';
 import { askPasskey } from '../ui/device.js';
 import { ExternalIcon, FingerprintIcon } from '../ui/icons.js';
 import { useAction, useErrorText } from '../ui/hooks.js';
@@ -19,7 +20,7 @@ export const PROVIDER_NAME: Record<SignInProvider, MessageKey> = { google: 'prov
  * it — not the single-tone tile a login gets in the list. GitHub's is its
  * monochrome mark, in the text colour. As in Keyrook Authenticator.
  */
-function ProviderMark({ provider }: { provider: SignInProvider }) {
+export function ProviderMark({ provider }: { provider: SignInProvider }) {
   if (provider === 'google') {
     return (
       <svg viewBox="0 0 48 48" className="h-[18px] w-[18px]" aria-hidden="true">
@@ -42,6 +43,28 @@ function ProviderMark({ provider }: { provider: SignInProvider }) {
 export const BACK_FROM_PROVIDER = location.hash === '#provider';
 
 /**
+ * Firefox: no web page can message an extension, so the sign-in cannot come
+ * back to a tab. It is made in the browser's own sign-in window, which ends
+ * at an address made from the add-on's id and hands that address back here;
+ * the worker takes the answer as it takes the page's in Chrome. The popup
+ * closes when another window opens, so from there the sign-in starts in the
+ * settings tab instead.
+ */
+async function signInByWindow(provider: SignInProvider, fromPopup: boolean): Promise<void> {
+  if (fromPopup) {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('options.html#signin') });
+    return;
+  }
+  const { url } = await send({ type: 'provider/start', provider });
+  const ended = await chrome.identity.launchWebAuthFlow({ url, interactive: true });
+  const fragment = ended?.includes('#') ? ended.slice(ended.indexOf('#') + 1) : '';
+  if (await send({ type: 'provider/answer', answer: fragment })) {
+    location.hash = '#provider';
+    location.reload();
+  }
+}
+
+/**
  * Signing in with Google or GitHub happens in this tab, as on a website: it
  * goes to Keyrook's server, on to the provider — whose page lists the
  * accounts this browser already knows — and comes back here.
@@ -51,6 +74,7 @@ export function ProviderButtons({ only, inNewTab = false, compact = false }: { o
   const { busy, error, run } = useAction();
   const go = (provider: SignInProvider) =>
     void run(async () => {
+      if (isFirefox()) return signInByWindow(provider, inNewTab);
       const { url } = await send({ type: 'provider/start', provider });
       // From the popup, a tab of its own: the popup closes the moment the person looks away.
       if (inNewTab) await chrome.tabs.create({ url });

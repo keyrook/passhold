@@ -1,10 +1,10 @@
 /**
- * Every label of an organisation's keys, and what each
- * binds. Nothing else in the package spells one.
+ * Every label of an organisation's keys, and what each binds. Nothing else in
+ * the package spells one.
  *
- * Frozen, before anything was stored under them
- * anywhere but a test: fixtures made once open what they sealed. As every
- * other label, they never change; a new format is a new label beside them.
+ * Frozen before anything was stored under them anywhere but a test: fixtures
+ * made once open what they sealed. As every other label, they never change; a
+ * new format is a new label beside them.
  *
  * Ids go in as an account's do (`assertAccountId`): no colon, so each string
  * reads one way. Generations and versions are positive integers, revisions
@@ -37,10 +37,20 @@ export const ORG_RECOVERY_HANDOVER_INFO = 'keyrook:v1:org-recovery-handover';
 export const ORG_PAGE_PIN_INFO = 'keyrook:v1:org-page-pin';
 /**
  * HKDF info: the key of an organiser's word to one member that a key is
- * someone's (`vouch.ts`). Not one of the 23 frozen, but frozen the
- * same way, with `orgVouchPrefix`.
+ * someone's (`vouch.ts`). Added later, and frozen the same way, with
+ * `orgVouchPrefix`.
  */
 export const ORG_VOUCH_INFO = 'keyrook:v1:org-vouch';
+
+/**
+ * HKDF info: a collection's key in a box from an organiser to one member,
+ * with the public half of the generation's write key, and its private half
+ * for those who may edit. Added later, and frozen the same way, with
+ * `ORG_RECORD_SIGNATURE` and `collectionAccessAad`.
+ */
+export const COLLECTION_ACCESS_BOX_INFO = 'keyrook:v1:collection-access-box';
+/** The first field of what a write key signs: a record, a deletion or who holds a collection, of a generation that has one. */
+export const ORG_RECORD_SIGNATURE = 'keyrook:v1:org-record-signature';
 
 /** What a member key is sealed under: its owner's root, or a product's key. */
 export type MemberKeyUnder = 'root' | string;
@@ -122,13 +132,20 @@ export function collectionNameAad(orgId: string, collectionId: string, generatio
 }
 
 /**
- * AAD of who holds a collection's key of one generation, under that key. Not
- * one of the 23 frozen, but frozen the same way.
+ * AAD of who holds a collection's key of one generation, under that key. Added
+ * later, and frozen the same way.
  */
 export function collectionHoldersAad(orgId: string, collectionId: string, generation: number): Uint8Array {
   ids(orgId, collectionId);
   assertGeneration(generation);
   return utf8(`keyrook.collection-holders:v1:${orgId}:${collectionId}:${generation}`);
+}
+
+/** AAD of an access box: a collection's key and write key of one generation, from one member to another. */
+export function collectionAccessAad(orgId: string, collectionId: string, generation: number, senderId: string, recipientId: string): Uint8Array {
+  ids(orgId, collectionId, senderId, recipientId);
+  assertGeneration(generation);
+  return utf8(`keyrook.collection-access:v1:${orgId}:${collectionId}:${generation}:${senderId}:${recipientId}`);
 }
 
 /** AAD of a root handed from one member to their emergency contact. */

@@ -16,5 +16,7 @@ export default defineConfig({
     { name: 'review', testDir: './review', timeout: 120_000 },
     // The stores' screenshots, one set per language: `npm run store:shots`.
     { name: 'store', testDir: './review', testMatch: 'store.shots.ts' },
+    // The introduction video's pictures of Passhold: `npm run video`.
+    { name: 'video', testDir: './review', testMatch: 'video.shots.ts' },
   ],
 });

@@ -13,6 +13,18 @@ describe('who may drive the vault', () => {
     expect(isTrustedSender({ id: ID }, ID)).toBe(false);
   });
 
+  it('knows its pages by the origin the browser gives them, which in Firefox is not made from its id', () => {
+    const ADDON = 'passhold@keyrook.com';
+    const PAGES = 'moz-extension://2c127fa4-62c7-7e4f-90e5-472b45eecfdc';
+    expect(isTrustedSender({ id: ADDON, origin: PAGES }, ADDON, PAGES)).toBe(true);
+    // Another add-on's pages, or a web page carrying our id, are not ours.
+    expect(isTrustedSender({ id: ADDON, origin: 'moz-extension://11111111-2222-3333-4444-555555555555' }, ADDON, PAGES)).toBe(false);
+    expect(isTrustedSender({ id: ADDON, origin: 'https://evil.example' }, ADDON, PAGES)).toBe(false);
+    expect(isTrustedSender({ id: 'another@example.com', origin: PAGES }, ADDON, PAGES)).toBe(false);
+    // Nor is the origin Chrome would have given: it is asked of the browser, never guessed.
+    expect(isTrustedSender({ id: ADDON, origin: `chrome-extension://${ADDON}` }, ADDON, PAGES)).toBe(false);
+  });
+
   it('hears the content script only from web pages', () => {
     expect(isContentSender({ id: ID, origin: 'https://example.com' }, ID)).toBe(true);
     expect(isContentSender({ id: ID, origin: 'http://example.com' }, ID)).toBe(true);

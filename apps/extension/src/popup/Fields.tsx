@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { useReveal, useValuesHidden } from '../ui/secrets.js';
 import type { CustomField } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import { useCopy } from '../ui/hooks.js';
@@ -183,10 +184,22 @@ export function FieldsEditor({ fields, onChange }: { fields: readonly CustomFiel
 }
 
 /** An item's own fields, opened: each to copy, a hidden one kept out of sight until asked, as a password is. */
-export function FieldsView({ fields }: { fields: readonly CustomField[] }) {
+/** `itemId`: the item they are of, which a hidden value is asked of where the page does not hold it (ui/secrets.ts). */
+export function FieldsView({ fields, itemId = '' }: { fields: readonly CustomField[]; itemId?: string }) {
   const t = useT();
   const { copied, copy } = useCopy();
-  const [shown, setShown] = useState<Record<number, boolean>>({});
+  const reveal = useReveal();
+  const hiddenHere = useValuesHidden();
+  // Each hidden value shown, as asked for; hidden again, it is let go.
+  const [shown, setShown] = useState<Record<number, string>>({});
+  const toggle = (index: number, held: string) =>
+    void (async () => {
+      if (index in shown) return setShown(({ [index]: _, ...rest }) => rest);
+      const value = await reveal(itemId, { kind: 'field', index }, held);
+      setShown((now) => ({ ...now, [index]: value }));
+    })().catch(() => undefined);
+  const copyValue = (index: number, field: CustomField) =>
+    void (async () => copy(`field-${index}`, field.hidden ? await reveal(itemId, { kind: 'field', index }, field.value) : field.value))().catch(() => undefined);
   return (
     <>
       {fields.map((field, index) => {
@@ -202,15 +215,15 @@ export function FieldsView({ fields }: { fields: readonly CustomField[] }) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    aria-label={shown[index] ? t('common.hide') : t('common.show')}
-                    title={shown[index] ? t('common.hide') : t('common.show')}
-                    onClick={() => setShown((now) => ({ ...now, [index]: !now[index] }))}
+                    aria-label={index in shown ? t('common.hide') : t('common.show')}
+                    title={index in shown ? t('common.hide') : t('common.show')}
+                    onClick={() => toggle(index, field.value)}
                   >
-                    {shown[index] ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+                    {index in shown ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
                   </Button>
                 )}
                 {field.value && (
-                  <Button size="sm" variant="ghost" aria-label={copyLabel} title={copyLabel} onClick={() => void copy(`field-${index}`, field.value)}>
+                  <Button size="sm" variant="ghost" aria-label={copyLabel} title={copyLabel} onClick={() => copyValue(index, field)}>
                     {copied === `field-${index}` ? <CheckIcon className="h-4 w-4 text-green-700 dark:text-green-300" /> : <CopyIcon className="h-4 w-4" />}
                   </Button>
                 )}
@@ -219,7 +232,7 @@ export function FieldsView({ fields }: { fields: readonly CustomField[] }) {
           >
             {field.hidden ? (
               <span className="font-mono break-all" data-testid="field-value">
-                {shown[index] ? field.value : '•'.repeat(Math.min(field.value.length, 16))}
+                {shown[index] ?? '•'.repeat(hiddenHere ? 12 : Math.min(field.value.length, 16))}
               </span>
             ) : (
               <p className="whitespace-pre-wrap" data-testid="field-value">

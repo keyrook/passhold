@@ -237,8 +237,8 @@ export async function replaceRecoveryKey(
  * the new root the moment this returns.
  *
  * Each family's member key this product holds is sealed again to the new
- * root in the same step, and, with a new product key,
- * under that key once the root is replaced.
+ * root in the same step, and, with a new product key, under that key once the
+ * root is replaced.
  */
 export async function replaceAccountRoot(
   api: HttpSyncAdapter,

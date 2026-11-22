@@ -88,6 +88,9 @@ describe('a family’s shared vault in the vault', () => {
     const [one] = kept.families;
     const due = sanitiseData(JSON.parse(JSON.stringify({ ...kept, families: [{ ...one, vaults: [{ ...one!.vaults[0], keyDue: true }, { ...vault(), id: 'other', keyDue: 'yes' }] }] })));
     expect(due.families[0]!.vaults.map((entry) => entry.keyDue)).toEqual([true, false]);
+    // View only, kept across a lock as it was set: anything but true is a vault this account may change.
+    const viewed = sanitiseData(JSON.parse(JSON.stringify({ ...kept, families: [{ ...one, vaults: [{ ...one!.vaults[0], viewOnly: true }, { ...vault(), id: 'other', viewOnly: 'yes' }] }] })));
+    expect(viewed.families[0]!.vaults.map((entry) => entry.viewOnly)).toEqual([true, undefined]);
 
     const junk = sanitiseData({
       items: [],
@@ -189,13 +192,16 @@ describe('moving into a shared vault', () => {
   it('takes the login out of the vault’s own, under a new id, without its earlier passwords or folder', () => {
     let data = withFamily('member', addLogin(emptyData(), { ...draft('Bank', 'first-Pass-1!'), folder: 'Money', fields: [{ name: 'PIN', value: '2468', hidden: true }] }).data);
     const own = data.items[0]!;
-    data = updateLogin(data, own.id, { ...draft('Bank', 'second-Pass-2!'), folder: 'Money' });
+    data = updateLogin(data, own.id, { ...draft('Bank', 'second-Pass-2!'), folder: 'Money' }, 2_000, { versions: true });
+    expect(data.items[0]!.versions).toHaveLength(1);
     const moved = moveToFamily(data, own.id, place, 5_000);
     expect(moved.data.items).toEqual([]);
     const there = shared(moved.data).items[0]!;
     expect(there.id).toBe(moved.id);
     expect(there.id).not.toBe(own.id);
     expect([there.password, there.history, there.folder, there.fields]).toEqual(['second-Pass-2!', [], '', [{ name: 'PIN', value: '2468', hidden: true }]]);
+    // Its versions hold its earlier passwords too: they stay behind with the history.
+    expect(there.versions).toBeUndefined();
   });
 
   it('is said to the account as the login leaving the vault, so no other browser keeps a copy', async () => {

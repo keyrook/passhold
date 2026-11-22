@@ -8,14 +8,19 @@
  * own origin, and reports a sign-in it saw sent so Passhold can offer to save it.
  */
 import type { ContentHello, ContentRequest, ContentResponseFor, FieldKind, ToContent } from '../lib/messaging.js';
-import { fieldKind, isPasswordField, loginFieldsIn, passwordsIn, scopeOf } from './fields.js';
+import { fieldKind, isPasswordField, isUsernameCandidate, isVisible, loginFieldsIn, newPasswordFields, passwordsIn, scopeOf, usable } from './fields.js';
 import { fill } from './fill.js';
 import { FieldButton, Frame } from './overlay.js';
 import { fillAddress, fillCard, hasCardFields, sentIn, walletFieldKind } from './wallet.js';
 
 /** Each frame is 6 × 8 px larger than the card it holds: room for the card's hard shadow. */
 const MENU_WIDTH = 326;
-const PROMPT_SIZE = { width: 366, height: 124 };
+/**
+ * Taller than any prompt's card at first: the card is drawn at the frame's
+ * foot, measures itself, and the frame shrinks to it (`ph/promptSize`) without
+ * the card moving.
+ */
+const PROMPT_SIZE = { width: 366, height: 220 };
 
 /**
  * What Passhold offers a field: a sign-in's, a new password's, a card's or
@@ -139,7 +144,12 @@ async function openMenu(field: HTMLInputElement, auto = false): Promise<void> {
   const rect = field.getBoundingClientRect();
   const word = small ? newWord() : '';
   if (small) window.top?.postMessage({ source: FRAME_WORD, word }, '*');
-  const opened = await ask({ type: 'content/openMenu', field: kind, auto, ...(small ? { inTop: { left: rect.left, top: rect.top, bottom: rect.bottom, word } } : {}) });
+  const opened = await ask({
+    type: 'content/openMenu',
+    field: kind,
+    auto,
+    ...(small ? { inTop: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, word } } : {}),
+  });
   if (!opened || mine !== asking) return;
   anchor = field;
   if (opened.inTop) {
@@ -148,7 +158,7 @@ async function openMenu(field: HTMLInputElement, auto = false): Promise<void> {
   }
   // Moved on, or already typing, while the answer came: the list would be in the way.
   if (auto && (!field.matches(':focus') || field.value)) return;
-  const frame = new Frame('menu.html', opened.token, { width: MENU_WIDTH, height: opened.height + 8 });
+  const frame = new Frame('menu.html', opened.token, { width: MENU_WIDTH, height: opened.height + 8 }, field);
   frame.besideField(field);
   menu = { frame, field, auto, token: opened.token };
 }
@@ -159,7 +169,7 @@ async function hostMenu(message: Extract<ToContent, { type: 'ph/hostMenu' }>): P
   const frame = await frameThatSaid(message.word);
   if (!frame) return false;
   closeMenu();
-  const list = new Frame('menu.html', message.token, { width: MENU_WIDTH, height: message.height + 8 });
+  const list = new Frame('menu.html', message.token, { width: MENU_WIDTH, height: message.height + 8 }, frame);
   list.besideFieldIn(frame, message.rect);
   menu = { frame: list, field: null, auto: message.auto, token: message.token };
   return true;
@@ -258,7 +268,11 @@ document.addEventListener(
       event.preventDefault();
       void openMenu(button.field);
     }
-    if (event.key === 'Enter' && isPasswordField(event.composedPath()[0])) capture(event.composedPath()[0] as HTMLInputElement);
+    if (event.key === 'Enter') {
+      const field = event.composedPath()[0];
+      if (isPasswordField(field)) capture(field);
+      else if (isUsernameCandidate(field)) captureFirstStep(scopeOf(field));
+    }
   },
   true,
 );
@@ -278,14 +292,98 @@ function capture(from: HTMLInputElement | HTMLFormElement): void {
   const { username, passwords } = loginFieldsIn(scope);
   // In a change-password form the last filled field holds the new password.
   const filled = passwords.filter((input) => input.value);
-  const password = filled.at(-1)?.value ?? '';
-  if (!password) return;
+  const field = filled.at(-1);
+  const password = field?.value ?? '';
+  if (!field || !password) {
+    captureFirstStep(scope);
+    return;
+  }
   const user = username?.value ?? '';
+  // The password being changed, where the form asks for it beside the new
+  // one: it names which of the site's logins this is when no username does.
+  const fresh = newPasswordFields(scope);
+  const old = fresh.length ? passwords.find((input) => !fresh.includes(input) && input.value && input.value !== password) : undefined;
   const key = `${user}\u0000${password}`;
   if (key === lastOffered) return;
   lastOffered = key;
+  void prefs().then(async (current) => {
+    if (!current?.ready || !current.offerToSave) return;
+    await ask({ type: 'content/offerSave', username: user, password, ...(old ? { current: old.value } : {}) });
+    // A form with a new password in it — one that changes it, or makes an
+    // account — may stay and empty itself once done. A sign-in form that
+    // empties its password has most likely refused it.
+    watchSignIn(field, passwords.length > 1 || field.autocomplete.includes('new-password'), key);
+  });
+}
+
+/**
+ * Whether the sign-in just sent went through, judged as Chrome judges it: a
+ * form is done with once its password field goes — the page moved on, or put
+ * the form away. One still there a while later most likely said the password
+ * was wrong, and offering to keep a wrong one — or to put it over the right
+ * one already saved — is worse than not asking. A page that moves to another
+ * document is judged by that document (`content/checkPrompt`). A form that
+ * changes a password may stay and empty itself instead.
+ */
+let watching = 0;
+
+function watchSignIn(field: HTMLInputElement, changing: boolean, key: string): void {
+  const mine = ++watching;
+  const started = Date.now();
+  let goneSince = 0;
+  // Whether the person did anything on the page after sending: then a page
+  // that goes is one they left — for "forgot password?", after a refusal —
+  // not one the sign-in moved on from.
+  let touched = false;
+  const touch = (event: Event) => {
+    if (event.isTrusted && Date.now() - started > 300) touched = true;
+  };
+  const leave = () => {
+    if (mine === watching && touched && field.isConnected && isVisible(field)) void ask({ type: 'content/signInSettled', through: false });
+  };
+  const end = () => {
+    clearInterval(timer);
+    removeEventListener('pointerdown', touch, true);
+    removeEventListener('keydown', touch, true);
+    removeEventListener('pagehide', leave);
+  };
+  addEventListener('pointerdown', touch, true);
+  addEventListener('keydown', touch, true);
+  addEventListener('pagehide', leave);
+  const timer = setInterval(() => {
+    // Sent again since — the person fixed a typo — and that one is watched instead.
+    if (mine !== watching || lastOffered !== key) return end();
+    const gone = !field.isConnected || !isVisible(field) || (changing && !field.value);
+    const now = Date.now();
+    // Gone for a moment, not a blink: a page that hides its form while it
+    // asks its server, then shows it again with an error, has not signed in.
+    goneSince = gone ? goneSince || now : 0;
+    if (goneSince && now - goneSince >= 700) {
+      end();
+      void ask({ type: 'content/signInSettled', through: true });
+    } else if (now - started > 15_000) {
+      end();
+      void ask({ type: 'content/signInSettled', through: false });
+    }
+  }, 250);
+}
+
+let lastFirstStep = '';
+
+/**
+ * A sign-in's first step sent — the username alone, the password asked for on
+ * the next page, as Google's and Microsoft's are. Its username is remembered
+ * for the step after, which names none, so the login is saved with it, and a
+ * password for one of several accounts is not taken for another's.
+ */
+function captureFirstStep(scope: ParentNode): void {
+  if (passwordsIn(scope).length) return;
+  const field = [...scope.querySelectorAll('input')].find((input) => isUsernameCandidate(input) && usable(input) && input.value.trim() && fieldKind(input) === 'login');
+  const username = field?.value.trim() ?? '';
+  if (!username || username === lastFirstStep) return;
+  lastFirstStep = username;
   void prefs().then((current) => {
-    if (current?.ready && current.offerToSave) void ask({ type: 'content/offerSave', username: user, password });
+    if (current?.ready && current.offerToSave) void ask({ type: 'content/firstStep', username });
   });
 }
 
@@ -348,6 +446,7 @@ document.addEventListener(
     if (!SENDS.test(label)) return;
     const password = [...document.querySelectorAll('input')].find((input) => isPasswordField(input) && input.value);
     if (password) capture(password);
+    else captureFirstStep(document);
   },
   true,
 );
@@ -379,22 +478,34 @@ if (window !== window.top) {
 
 // --- the save prompt, top frame only -------------------------------------------------
 
-let prompt: Frame | null = null;
+let prompt: { frame: Frame; token: string } | null = null;
 
 function showPrompt(token: string): void {
   if (window !== window.top) return;
-  prompt?.remove();
-  prompt = new Frame('prompt.html', token, PROMPT_SIZE);
-  prompt.inCorner();
+  // Asked twice for the same one — by the service worker and by this page's
+  // own check as it loads — it is drawn once: drawn again, it would blink.
+  if (prompt?.token === token) return;
+  prompt?.frame.remove();
+  const frame = new Frame('prompt.html', token, PROMPT_SIZE);
+  frame.inCorner();
+  prompt = { frame, token };
 }
 
-if (window === window.top) {
-  void prefs().then(async (current) => {
-    if (!current?.ready) return;
-    const waiting = await ask({ type: 'content/checkPrompt' });
-    if (waiting) showPrompt(waiting.token);
-  });
+async function checkPrompt(): Promise<void> {
+  const waiting = await ask({ type: 'content/checkPrompt', signInForm: passwordsIn(document).length > 0 });
+  if (waiting) showPrompt(waiting.token);
 }
+
+/**
+ * Every document says once it has loaded, and whether it shows a sign-in
+ * form: a sign-in sent from the document before it went through unless the
+ * page came back to one (`content/checkPrompt`). A moment after loading, for
+ * a page that draws its form with script.
+ */
+void prefs().then((current) => {
+  if (!current?.ready) return;
+  setTimeout(() => void checkPrompt(), 400);
+});
 
 // --- what the service worker sends -------------------------------------------------------
 
@@ -432,8 +543,14 @@ chrome.runtime.onMessage.addListener((message: ToContent, sender, respond) => {
       showPrompt(message.token);
       return false;
     case 'ph/closePrompt':
-      prompt?.remove();
+      prompt?.frame.remove();
       prompt = null;
+      return false;
+    case 'ph/promptSize':
+      prompt?.frame.resize(message.height);
+      return false;
+    case 'ph/askPrompt':
+      void checkPrompt();
       return false;
     case 'ph/checkIn':
       // Not an answer with an address in it: a message of its own, which Chrome stamps with this frame's.

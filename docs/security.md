@@ -7,7 +7,7 @@ claim here has a test that tries to break it; the test is named beside it.
 
 Logins — a name, a username, a password, the websites it is for, notes, and
 a website's passkey when it has one — and beside them payment cards,
-addresses and notes, in one vault per browser profile. Any of them may have
+addresses, notes, SSH keys and API keys, in one vault per browser profile. Any of them may have
 fields of its owner's own — a PIN, a security question's answer — and a
 folder. Both are sealed inside the item, as its password is: a folder is a
 name on each item, not a record of its own, so the server learns no folder's
@@ -15,9 +15,10 @@ name nor that there are any (`folders.test.ts`, `e2e/folders.spec.ts`). A
 field marked hidden is kept out of sight in Passhold's pages until asked
 for, and out of search; it is never filled into a web page. Signed out of a Keyrook account, nothing
 leaves the machine; signed in, only sealed records, to Keyrook's server and
-nowhere else (below). No favicon service, no breach check. The extension's
-only `connect-src` is that server, fixed at build time
-(`test/manifest.test.ts`).
+nowhere else (below), and files to the store the account names. No favicon
+service; the breach check only on a paid plan, when pressed (below). The
+extension's `connect-src` is that server and Keyrook's Cloudflare R2 address,
+where files are put sealed, fixed at build time (`test/manifest.test.ts`).
 
 ## The Keyrook account and sync
 
@@ -218,7 +219,10 @@ and with it the old logins, joined into the vault as a backup's are
 - **The network never holds the vault.** A sync pulls, brings what came into
   the vault inside the write queue, pushes, and settles inside the queue
   again; a change made meanwhile goes out next time. One sync runs at a time,
-  so a refresh token is never spent twice — the server ends a session for that.
+  and every refresh the service worker makes, for a sync or anything else,
+  goes through one place that spends a refresh token once and hands whoever
+  else held it the pair it rotated to (`lib/refresh.ts`): the server ends a
+  session for a token spent twice (`test/refresh.test.ts`).
 - **Signing out takes the vault off this browser**, as Bitwarden's and
   1Password's do: whoever uses it next finds nothing of its owner's, and
   signing in again brings everything back from the account. It happens only
@@ -621,6 +625,18 @@ renderer could take the file to guess the master password against offline,
 or write over the vault or remove it (`e2e/renderer.spec.ts`, which runs in
 the content script's own world what such a page would).
 
+Firefox cannot close local storage to content scripts. In the Firefox build
+the vault file, the copies of its key and the switches are kept instead in
+the extension's own IndexedDB, which belongs to the extension's origin while
+a content script has the page's; local storage holds only the theme and when
+to ask for a rating (`lib/storage.ts`; `test/storage.test.ts` plays a page
+that reads, writes over and removes everything there). Firefox leaves an
+extension's databases alone when its owner clears site data, and the build
+asks for `unlimitedStorage` so that Firefox does not evict this one when the
+disk fills up. It needs Firefox 153, the first that names each document
+(`documentId`): the worker learns where a frame is from that stamp and sends
+a fill to that one document, as it does in Chrome.
+
 ## Filling
 
 1. The person presses the Passhold button in a field. The content script asks
@@ -648,7 +664,9 @@ the content script's own world what such a page would).
    one gets nothing (`e2e/autofill.spec.ts`).
 6. A list or prompt that the page has covered, faded or transformed will not
    act: IntersectionObserver v2 reports whether the frame is really seen,
-   computed by the browser out of the page's reach.
+   computed by the browser out of the page's reach. Firefox does not compute
+   it: there the frame counts as seen, and a decoy laid over the list is
+   held back only by the half second below.
 7. A click counts only once the frame has been seen, where it is, for half a
    second. A list put up, filled with its rows, or moved — the page scrolled,
    or moved or resized the field — under a pointer already on its way down,
@@ -735,6 +753,50 @@ as a sign-in does, and are checked as anything typed is:
 A card split across a payment provider's frames is not offered: the frames
 that hold it are not the one that sends the checkout.
 
+## API keys
+
+A key a program uses to reach a service — Stripe's, GitHub's, a cloud's —
+kept as a wallet item (`ApiKeyItem`): the key, the part that is not secret
+(an access key's id), the hosts it goes to, how a request carries it, the
+variable a command reads it from, its environment and scopes, its dates.
+
+- **Never filled into a page.** No list under a field offers one, and the
+  service worker fills a field only with a card or an address of that
+  field's kind, whatever id a page names (`fillableWalletItem`,
+  `apikey.test.ts`); Android's autofill hands out logins alone
+  (`apps/android/test/apikey.test.ts`). A key is copied, read by a command
+  (`passhold://vault/item/key`), or, later, used by an agent through Passhold.
+- **Sealed as every wallet item is**, a `passhold.wallet` record under
+  Passhold's key: the server cannot tell an API key from a card or a note,
+  nor read its service, hosts or dates (`apikey.test.ts`). A Passhold from
+  before it skips such a record and leaves it alone, as it skips any wallet
+  kind it does not know (`mergePulled`).
+- **Its expiry is this device's to see.** Expired, or running out within 14
+  days, a key is said in its list, on its page and in the checkup; the date
+  is sealed, so the server cannot remind anyone, and does not.
+- **A key replaced is kept**, as a login keeps its passwords: the last five
+  keys and hidden fields' values, in the item, joined across devices so
+  neither copy's is lost (`apikey.test.ts`). No page sends that history: an
+  edit that carries one plants nothing.
+- **Never searched by its key**, nor shown in a list: a list names it by
+  its service and environment, or its last four characters when nothing
+  else tells two apart.
+- **Where it may go is checked as it is saved.** A host is a host, or
+  `*.example.com` for one and those under it; a star over a whole suffix
+  (`*.com`, `*.github.io`) is refused, as it would hand the key to whoever
+  registers a name there. How it is sent is one of four ways, and a header's
+  name is an HTTP token, so no line break rides into a request.
+- **Its service's mark** is the catalogue's, compiled in (`apikey.ts`, beside
+  `brand/catalog.ts`); a key pasted with a service's prefix names the
+  service, and nothing is fetched.
+- **Imported** from Passhold's own CSV of API keys, 1Password's `.1pux` (its
+  API Credentials; only `export.data` is read out of the archive, and a file
+  that inflates past the import bound is refused before it is all in memory),
+  Bitwarden Secrets Manager's list of secrets, and Bitwarden's export, where a
+  login's password starts as a service's keys do or a hidden field is named
+  for one: those are offered, and come as keys only where their owner ticks
+  them. Exported, after proof as logins are, in a CSV of their own.
+
 ## Saving
 
 When a form with a password is sent, the content script reports the
@@ -745,8 +807,19 @@ shows the username and site but never the password. Saving while locked
 waits for the popup to be unlocked. "Never for this site" is remembered in
 the vault.
 
+Nothing is offered until the sign-in went through: its password field went
+away, or the page moved on to one without a sign-in form. A page that comes
+back to its form, keeps it a while, or is left by the person after sending
+it most likely refused the password, and a refused password is never offered
+— least of all over the right one already saved. A form that names no
+username is matched by the username sent on the step before it in the same
+tab, or by the password it says it is changing; where the site has several
+logins and nothing names one, nothing is offered rather than a guess.
+
 A page can make the prompt appear with whatever it puts in its own fields;
-saving still needs a click, and saves only for that page's own site.
+saving still needs a click, and saves only for that page's own site. The
+same is true of what it says went through, or of a first step's username: it
+can change only what is offered for its own site, in its own tab.
 
 ## Websites' passkeys
 
@@ -871,8 +944,8 @@ or made by someone else, so it is input like any other (`backup.test.ts`):
 
 The checkup — weak passwords, passwords used for more than one login, a
 backup missing or behind — is worked out in the page from the vault, and
-nothing is sent anywhere for it. It does not check passwords against breach
-lists, because that would mean asking a server. "Change" opens the site's
+nothing is sent anywhere for it. The breach check beside it is the exception,
+run only when its owner presses it (below). "Change" opens the site's
 own `/.well-known/change-password` address in a new tab: a visit the person
 chooses, not a request Passhold makes.
 
@@ -881,6 +954,268 @@ by the login's own websites, never fetched: an icon requested at display time
 would tell whoever serves it every site its owner has an account on. A login
 saved for a look-alike host does not wear the real site's mark
 (`checkup.test.ts`).
+
+## What the paid plans add
+
+Each runs the Keyrook account's flows (`packages/core/src/account/paid.ts`,
+tested against the account's own server from the kit in
+`packages/core/test/paid.test.ts`, the extension in `e2e/paid.spec.ts`). The
+plan is the server's to say: a feature it does not hold is refused there, in a
+sentence placed in `background/sentences.ts`, and nothing is deleted for it.
+Passhold reads the plan (`GET /account/billing`) as it syncs, only to know what
+to offer, and keeps it on the account link: a server that cannot be asked
+leaves the last answer standing (`e2e/paid.spec.ts`, the plan). Until the
+server says it sells plans (`offered`), a page shows nothing of a paid plan,
+not even that a feature is part of one; a plan held from before is honoured
+either way (`e2e/paid.spec.ts`, a server that sells no plans yet).
+
+- **2FA codes**, from the link the account keeps between Keyrook Authenticator
+  and Passhold. The link is turned on on the account page alone; Passhold
+  sends its owner there. Its records are sealed under a key both apps hold
+  and nothing else does, bound to their place and revision: a record the
+  server moved or replayed does not open, and shows no code. A code goes with
+  a login by the site its websites name, never by anything the server says.
+  The codes are read at each sync and kept in session storage, beside the
+  vault's key and gone with a lock, so opening a login asks the server
+  nothing (`e2e/paid.spec.ts` watches for it). A page is handed the code it
+  shows now and when it changes, never the secret, which the suite looks for
+  in what a page gets and on disk.
+- **Send.** What is sent is sealed here, under a key the link's secret (and
+  the password, if one is set) derives, and the link is shown once and kept
+  nowhere. The server holds nothing it could read (`paid.test.ts` reads its
+  table). A copy of a login is plain text out, and asks for proof first, as
+  an export does. Text and files are sealed in the page that read them, each
+  file under a key of its own that only the sealed text holds; the page puts
+  the files where the server says, and the service worker, asked first for
+  the plan, makes every call to the account (`send/begin`, `send/finish`,
+  `send/cancel`). A Send whose files do not all arrive is deleted again. The
+  store learns sealed sizes; `e2e/paid.spec.ts` reads what it was sent.
+- **The breach check**, on a plan that holds it — the service worker asks the
+  plan before anything is hashed, never learning it from the server's refusal
+  (`e2e/paid.spec.ts`) — and run only when its owner presses it. Each password's
+  SHA-1 is made in the service worker; the first five characters of each go to
+  Keyrook, which asks Pwned Passwords, and the rest is matched here
+  (`paid.test.ts` reads every request it made). Keyrook learns those five
+  characters per password, which narrow nothing down to one password, linked
+  to the account that asked.
+- **A shared vault this account may only view** is filled and copied from,
+  and refused every change in the service worker, whatever a page sends; its
+  records are never sent up (`e2e/family.spec.ts`). A record not signed by
+  someone who may edit it does not open, and shows as an item that does not.
+- **Emergency access.** Passhold makes its own box of the account's contact
+  key as it syncs, and hands its key over only to a contact whose key was
+  compared here, on both screens. A key the server swaps in after that is a
+  code to compare again, and nothing is sealed to it (`paid.test.ts`). The
+  contact reads the grantor's vault, once access opens, read only, with a key
+  the account's code draws from the grantor's and keeps from Passhold —
+  every kind of item, never a passkey's private key, and none of the
+  versions or files that would be asked of the contact's own vault.
+  Settings shows emergency access as the last sync saw it, so opening it asks
+  the server nothing.
+- **Files kept with an item** (`packages/core/src/account/files.ts` and
+  `vault/attachments.ts`).
+  A file is sealed on the device that adds it, by the account's own flow,
+  under a key made for that file alone; the bytes go straight to the store
+  and the server learns a size, never a name, a type or a key. The key and
+  the name are kept in the item's own sealed record, so a file opens for
+  whoever opens the record and for no one else, and travels as its item does.
+  Its seal binds each 1 MiB chunk to the file's id, its place and how many
+  there are, and the item names the file's size besides: a store or a server
+  that hands back another file, a changed byte, chunks moved or a file cut
+  short is refused, and nothing is saved (`packages/core/test/files.test.ts`,
+  `apps/cli/test/cli.test.ts`, `e2e/paid.spec.ts`). In the extension the page
+  its owner is looking at moves the bytes and runs the flow, while every call
+  to the account goes through the service worker, which holds the session
+  and decides which item, and which vault's store, a file is for. Pages are
+  handed a file's key only for the one being opened. A picture or a text is
+  shown as an image or as text, never as a page of Passhold's own; anything
+  else is saved, typed as plain bytes. A file is chosen in Settings: a popup
+  closes when a file chooser opens over it. Two devices adding or taking off
+  files at once lose none of them: a copy that lacks a file never takes its
+  key from another, and a file taken off is named in the item, so a copy from
+  before does not bring it back. A file no item names any more — taken off,
+  or its item's trash emptied — is deleted in the account after the record
+  that no longer names it has gone up, and tried again at each sync until the
+  account says it is gone. In a shared vault, only an organiser deletes one.
+  An item with files does not move into a shared vault: they are its owner's
+  in the account, which no one else in the family may read. On a plan that
+  has ended, what is kept still opens and deletes; only adding stops. The
+  store is a Cloudflare R2 bucket of Keyrook's, named in `connect-src` by
+  the account's R2 address (`FILES_STORE`, `scripts/api.mjs`), under which
+  each of Keyrook's buckets is a path; the server signs an address for one
+  file, for minutes.
+
+## The command line
+
+`passhold` (`apps/cli`, a paid feature) runs the same account flows as the
+extension, against the account's server, tested against the one from the kit
+(`apps/cli/test`).
+
+- **Nothing a login holds is written to disk.** The terminal keeps which
+  account is signed in, its session, and the unlock: Passhold's key sealed
+  under a key that exists only in the shell's `PASSHOLD_SESSION`, its end
+  sealed with it, so a file edited to last longer does not open. Every command
+  pulls the sealed records and opens them in memory (`cli.test.ts` reads the
+  folder for every secret it put in).
+- **Plain text out asks for its owner again**, as in the extension: an export
+  and a copy of a login sent by link take the account's password or the
+  recovery key, which must open the very key the unlock holds.
+- **A family's shared vaults** are opened as the extension opens them
+  (`openFamily`): on its first look it takes the roster as the account page
+  does; after, the roster is checked against what this terminal pinned the
+  time before, kept sealed under Passhold's key, and a family key or a member
+  key it has not seen is taken only once its owner compares codes
+  (`passhold compare`). Someone the roster stops listing is named on every
+  command until `passhold vaults` has shown it. A vault this account may only
+  view is never written: the command refuses, and past it the flows sign
+  nothing and the server takes nothing (`family.test.ts` goes past the
+  command's own check). Nothing is sealed under a key someone gone still
+  holds; a deletion goes to the shared trash, and nothing here empties one.
+- **The SSH agent** lists and signs; it hands out no key and takes none
+  (`ssh-add` is refused). It listens on a socket only its owner may open
+  (mode 600, in their own folder) or, on Windows, on OpenSSH's named pipe.
+  Each signature is asked for first — in a dialog, through `SSH_ASKPASS`, or
+  in its terminal — and it will not start where it cannot ask unless told to
+  sign without asking (`--no-confirm`). The question says which key, and the
+  user name or `ssh-keygen` namespace the request names, made one short
+  line so a crafted name cannot write the question. The key offered is the
+  one the private key's own fields make; a file whose public key in the clear
+  says otherwise is refused. It stops when Passhold is locked or the unlock
+  ends (`agent.test.ts`, with OpenSSH's own `ssh-add` and `ssh-keygen`).
+  Any process running as its owner may still ask, and is asked about.
+
+## Passhold for Android
+
+A first build (`apps/android`, Capacitor): the account's logins, read and
+filled, never changed on the phone; and its API keys, read, copied, made and
+changed. It reaches the account's server from
+native code with no origin and names itself `passhold-android/…`; the
+WebView's pages come from the package.
+
+- **Kept on the phone only behind a fingerprint.** Signed in, the vault is in
+  memory and gone with the app. Its owner may keep it (`src/phone.ts`): one
+  file in the app's no-backup files, plain JSON whose payload — the logins,
+  Passhold's key in the account, the session's tokens — is AES-256-GCM under
+  a data key drawn for the phone and bound to the file's id. The data key is
+  sealed by a key in Android's keystore made for strong biometrics only, on
+  every use, and thrown away by Android when a fingerprint is added: someone
+  who learns the phone's PIN cannot enrol a finger and open Passhold
+  (`PhonePlugin.java`). Android 11 and later; before that, or with no
+  fingerprint, nothing is kept and the account opens the vault each time.
+  `test/phone.test.ts` looks for every secret in what is written and tries
+  other keys, spliced payloads and a flipped bit. A session the server no
+  longer takes ends the kept copy at the next read; the app locks itself
+  five minutes out of sight.
+- **Filling another app** goes through Android's autofill. The service holds
+  nothing: it offers one row, "Passhold", locked; choosing it opens the app,
+  which asks for the fingerprint, and only the login chosen there comes back,
+  to the fields Android found in the asking screen, never fields the page
+  names. In a browser the logins of the page's own site are put first, matched
+  as the extension matches; in an app none is put forward. A copy to the
+  clipboard is marked sensitive and cleared after the vault's clipboard time.
+- **Websites' passkeys** through Credential Manager (Android 14 and later).
+  Only a browser on Google Password Manager's own list
+  (`res/raw/passkey_browsers.json`, its release builds only, refreshed by
+  `scripts/passkey-browsers.ts`) is believed when it names the page; Android
+  checks its package and signing key. Any other app asks for itself, and no
+  website's passkey is for it. The signature is made in the app, for the
+  site the request comes from, as the extension's worker makes it
+  (`test/vault.test.ts`).
+- **An API key made or changed on the phone goes to the account at once**
+  (`writeOne` in `src/phone.ts`): the account read again, that one record
+  sealed under Passhold's key at the revision after the account's, nothing
+  else written, then read back. Another device's edit made a moment before
+  is gone over, not lost; the phone never holds a change of its own unsent,
+  so a server restored from a backup still reads it afresh
+  (`test/apikey.test.ts`).
+- **No page but its own, and no plan.** Google Play takes the payment for
+  what an app sells, and Passhold's plans are sold on the web: the app never
+  points there. The WebView loads the app's pages and nothing else — a link,
+  a script, a redirect opens nothing, not even in a browser
+  (`PhonePlugin.ownPage`, `PageLockTest.java`); the one page opened, in the
+  browser sheet, is a Google or GitHub sign-in started at the account's
+  server (`sheetMayOpen`); no word on a screen names a plan or a price
+  (`test/links.test.ts`).
+
+## Passhold's web vault
+
+The vault in any browser, phones first, at `vault.keyrook.com`
+(`apps/web`): a page of Passhold's own, apart from the account's page, on an
+origin of its own. It is a Passhold device as the extension is one: it signs
+in with the account's flows, opens Passhold's key as any Passhold does, and
+reads and writes the account's sealed records with the same code
+(`@passhold/core`: `applyMutation`, `syncOwnRecords`, `syncFamilies`). What
+any Passhold takes from the server, it takes; what none takes, it does not.
+
+- **Where the keys live.** A dedicated worker the page starts holds
+  Passhold's key, the records key and the opened vault, for as long as the
+  vault is unlocked (`src/worker/engine.ts`). The screens describe a change
+  and the worker applies, seals and sends it, as the extension's service
+  worker does. The screens are handed less than the extension's pages are:
+  besides what no page is handed (`pageView`: a website's passkey's private
+  key, a file's key, the account's key or its session), every hidden value
+  stands hidden (`hideSecrets`) — a password and those it replaced, a hidden
+  field, a card's number and code, an SSH key's private half, and each of
+  them in an item's versions. One is asked of the worker as it is shown or
+  copied (`item/reveal`), and an item is handed whole only to its edit
+  screen; a value hidden again is let go.
+- **A lock ends that worker** and starts an empty one, which opens nothing
+  until the password, the recovery key or a passkey opens it again. The
+  screens drop every item at once; the worker is first let send what was
+  changed and not yet sent — ten seconds at most — and the lock screen says
+  so when a change could not go. Leaving the page ends it at once, sent or
+  not: a change goes up the moment it is made, and again as the tab is
+  hidden, and a computer's browser asks before a tab is closed on one. It locks
+  after the minutes chosen without a key, a tap or a click (15 unless
+  chosen; 1 to 60, never "never"), when the tab comes back after more than a
+  minute hidden — a minute lets a person copy a password into another app and
+  come back — and when the page is left, so a page the browser restores from
+  its back-forward cache opens locked. A reload opens locked. Five wrong
+  passwords at a locked tab sign it out. `e2e/vault.spec.ts` tries each.
+- **What it keeps.** In the tab's `sessionStorage` only, under
+  `passhold.web.session`: the session's tokens, the account's id and address,
+  the tab's device id, the lock time chosen and the wrong tries so far; and,
+  only across a Google or GitHub sign-in's redirect, `passhold.web.oauth`.
+  Nothing in `localStorage`, IndexedDB or caches, and no service worker:
+  every sitting reads the records again. Closing the tab ends the sitting;
+  the server ends its session twelve hours after sign-in in any case. A
+  string a screen showed is freed when the browser collects it, which no
+  page controls.
+- **What Passhold on a computer keeps between sittings, and the vault does
+  not:** the root and the families it pinned, read again from what
+  Passhold's key opens in the account; what it knows of each record's
+  revision, read again from the start; when a login was last used, and the
+  vault's own settings (the generator's, the lock's), which the vault does
+  without; the account's recovery key kept in the vault, which the web vault
+  never shows; files no item names, deleted by the next Passhold that syncs
+  as by this one.
+- **Unlocking.** The account's password, typed in the page itself: the
+  root's password wrap opens here, with no new sign-in and no second step.
+  Or the account's recovery key. Or one of the account's passkeys, whose PRF
+  answer opens the root in the worker and is never sent — offered only where
+  the browser says it honours the account's page's list of its related
+  origins, and on an iPhone from iOS 18.4. Signing in asks the second step
+  when the account has one; Google and GitHub prove who signs in, never what
+  opens the data.
+- **The served code.** Its policy: its own scripts and the account's two
+  addresses, nothing else — no framework or font loaded at run time, no
+  analytics — with Trusted Types required, so no markup is ever written into
+  the page (`headers.mjs`). Every script and stylesheet `index.html` loads
+  carries its `integrity`. Not minified, and the same bytes from two builds
+  of one tag, so anyone can rebuild it and compare each file with the list
+  of hashes published beside the tag. `test/bundle.test.ts` reads the built
+  page for anything it must not hold, and is shown to catch each kind
+  planted in a copy.
+- **What it does not do.** It fills no other site — a page cannot reach
+  another site's fields — and signs in to no website with a stored passkey.
+  It sets nothing up and sends no plain text out: import, export, backups,
+  Send, emergency access and managing a family stay in the extension and on
+  the account's page.
+- **The extension stays out of it.** No script of Passhold's runs on the
+  web vault (`scripts/manifest.mjs`): nothing offered to be saved or filled
+  there, and no passkey request of that page — the account's passkeys —
+  taken by Passhold's passkey provider. The worker refuses anything from that
+  origin besides (`e2e/autofill.spec.ts`).
 
 ## Not defended against
 

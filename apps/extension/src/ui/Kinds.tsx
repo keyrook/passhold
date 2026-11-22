@@ -2,12 +2,16 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { WalletKind } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import type { MessageKey } from '../i18n/locales/en.js';
-import { HomeIcon, KeyIcon, ListIcon, PlusIcon } from './icons.js';
+import { CodeIcon, HomeIcon, KeyIcon, ListIcon, PasswordIcon, PlusIcon } from './icons.js';
 import { Button, cx } from './primitives.js';
 import { CardMark } from './WalletMark.js';
 
-/** Which kind of thing a list shows. */
-export type Shown = 'all' | 'login' | WalletKind;
+/**
+ * Which kind of thing a list shows. An SSH key or an API key has no chip of
+ * its own: five fill the popup's row, and a sixth would move everything under
+ * them. Each is listed with everything, and found by search.
+ */
+export type Shown = 'all' | 'login' | Exclude<WalletKind, 'ssh' | 'apikey'>;
 /** What a person may add. */
 export type AddKind = 'login' | WalletKind;
 
@@ -53,9 +57,11 @@ const ADD: { kind: AddKind; label: MessageKey; mark: ReactNode }[] = [
   { kind: 'card', label: 'add.card', mark: <CardMark network={null} size={20} /> },
   { kind: 'address', label: 'add.address', mark: <HomeIcon className="h-[18px] w-[18px]" /> },
   { kind: 'note', label: 'add.note', mark: <ListIcon className="h-[18px] w-[18px]" /> },
+  { kind: 'ssh', label: 'add.ssh', mark: <CodeIcon className="h-[18px] w-[18px]" /> },
+  { kind: 'apikey', label: 'add.apikey', mark: <PasswordIcon className="h-[18px] w-[18px]" /> },
 ];
 
-/** "Add", and what to add: a login, a card, an address or a note. `wide`: the button says it, rather than showing a plus alone. */
+/** "Add", and what to add: a login, a card, an address, a note, an SSH key or an API key. `wide`: the button says it, rather than showing a plus alone. */
 export function AddMenu({ onAdd, wide = false }: { onAdd: (kind: AddKind) => void; wide?: boolean }) {
   const t = useT();
   const [open, setOpen] = useState(false);

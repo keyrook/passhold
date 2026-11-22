@@ -46,12 +46,19 @@ export interface RemoteRecord {
   box: SealedBox | null;
 }
 
+/**
+ * How Passhold's records key is drawn from its product key: HKDF-SHA256, as
+ * `recordsKey` draws it, and as an emergency contact asks the account's code
+ * to draw it from a grantor's key it holds and never sees.
+ */
+export const RECORDS_DRAWING = { salt: new Uint8Array(32), info: 'passhold:v1:records' } as const;
+
 /** The key Passhold's records are sealed under, drawn from Passhold's key in the account. */
 export async function recordsKey(productKey: CryptoKey): Promise<CryptoKey> {
   const raw = await crypto.subtle.exportKey('raw', productKey);
   const material = await crypto.subtle.importKey('raw', raw, 'HKDF', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32) as BufferSource, info: utf8('passhold:v1:records') as BufferSource },
+    { name: 'HKDF', hash: 'SHA-256', salt: RECORDS_DRAWING.salt as BufferSource, info: utf8(RECORDS_DRAWING.info) as BufferSource },
     material,
     { name: 'AES-GCM', length: 256 },
     false,

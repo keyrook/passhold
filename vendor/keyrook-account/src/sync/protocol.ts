@@ -4,6 +4,9 @@
  * Types only. Keeping the contract in the
  * shared package means the extension, the future native apps and the server all
  * compile against one definition rather than three drifting copies.
+ *
+ * Nothing here is trusted because the server sent it: what a device acts on,
+ * it checks itself.
  */
 import type { SealedBox } from '../crypto/aead.js';
 import type { RecoveryWrap } from './kit.js';
@@ -107,7 +110,7 @@ export interface LoginRequest {
   secondStep?: true;
 }
 
-// --- A second step at sign-in -------------------------
+// --- A second step at sign-in ------------------------------------------------
 
 /**
  * The answer to a sign-in, with the password or Google or GitHub, on an
@@ -178,9 +181,9 @@ export interface LoginResponse {
      */
     providers?: SignInProvider[];
     /**
-     * The name the person gave the account, if any.
-     * The server's word, shown as text and never taken as a sign of who
-     * anyone is. A server from before says nothing.
+     * The name the person gave the account, if any. The server's word, shown
+     * as text and never taken as a sign of who anyone is. An older server says
+     * nothing.
      */
     name?: string | null;
   };
@@ -202,7 +205,17 @@ export type SignInProvider = 'google' | 'github';
 //     (or #error=…&state=…)
 //
 // A phone app asks with `return=app&app=<app id>` in place of `ext`, and is
-// handed `<app id>:/oauth#ticket=…&state=…`.
+// handed `<app id>:/oauth#ticket=…&state=…`. A Firefox extension sends its
+// add-on id as `ext` and is handed the answer at
+// `https://<SHA-1 of the id, hex>.extensions.allizom.org/oauth#…`, where
+// `identity.launchWebAuthFlow` waits; never by `return=message`, which no
+// Firefox extension can receive.
+//
+// A product's web page asks with `client=web&origin=<its origin>` and
+// nothing else naming a way back, and is handed `<origin>/#ticket=…&state=…`.
+// The server takes only an origin it lists as that product's page, and gives
+// the session it then signs in a shorter life: ten minutes per access token,
+// and none past 12 hours after signing in, refreshes included.
 //
 // The ticket is worth nothing without the verifier, which never leaves the
 // extension or the app.
@@ -495,8 +508,8 @@ export interface DeviceSummary {
   /**
    * The id the device chose and sends at sign-in, which a removal proof names
    * (`makeDeviceRemovalProof`). As the server reports it: a server that lies
-   * about it gets a proof the device it names refuses. An older server says nothing: no proof can name the device, and removing it
-   * only signs it out.
+   * about it gets a proof the device it names refuses. An older server says
+   * nothing: no proof can name the device, and removing it only signs it out.
    */
   deviceId?: string;
   name: string;
@@ -576,15 +589,19 @@ export interface ConsoleSummary {
   secondStep?: { since: number } | null;
   /** Whether this server offers families; a server from before them says nothing, which is no. */
   orgsOffered?: boolean;
+  /** Whether this server sells plans, so the page shows them; a server from before them says nothing, which is no. */
+  billingOffered?: boolean;
+  /** Whether this server looks up breaches, so the page shows Breach alerts; a server from before them says nothing, which is no. */
+  breachOffered?: boolean;
   /** Who else opened the account's root, newest first, until it is replaced (`RootSeen`). An older server says nothing. */
   rootSeen?: RootSeen[];
 }
 
 /**
- * Someone else opened the account's root: its emergency contact once it was handed over, or a family's
- * organiser helping it back in. Until the root is replaced they could open it
- * again, and every product's key with it, so the page and the apps ask for
- * that. Gone once it is.
+ * Someone else opened the account's root: its emergency contact once it was
+ * handed over, or a family's organiser helping it back in. Until the root is
+ * replaced they could open it again, and every product's key with it, so the
+ * page and the apps ask for that. Gone once it is.
  */
 export interface RootSeen {
   how: 'emergency' | 'organiser';
@@ -612,10 +629,10 @@ export interface ConsoleProduct {
 // --- GET /account/export ----------------------------------------------------
 
 /**
- * What the server holds about the account, for the person to download.
- * Like the overview, nothing sealed, wrapped or hashed
- * is in it: those open nothing for the person, and each app exports what it
- * holds, decrypted, on the device.
+ * What the server holds about the account, for the person to download. Like
+ * the overview, nothing sealed, wrapped or hashed is in it: those open nothing
+ * for the person, and each app exports what it holds, decrypted, on the
+ * device.
  */
 export interface AccountExport {
   /** When the server answered, by its clock. */
@@ -638,7 +655,9 @@ export interface AccountExport {
   previousEmail?: { email: string; keptUntil: number } | null;
   /** The last 90 days of sign-ins and changes, as the page shows them. An older server says nothing. */
   activity?: SecurityEvent[];
-  /** The families the account is in, its place in each, and its emergency access. An older server says nothing. */
+  /** Files the account keeps, each sealed: which app's, how big, since when. An older server says nothing. */
+  files?: { product: string; size: number; createdAt: number }[];
+  /** The families the account is in, and its place in each. An older server says nothing. */
   orgs?: ExportedOrg[];
   /** Invitations still waiting: to the account's address, and those it sent. */
   orgInvites?: {
@@ -649,6 +668,42 @@ export interface AccountExport {
   leftFamily?: { leftAt: number; joinAnotherFrom: number } | null;
   /** Who else opened the account's root since it was last replaced. */
   rootSeen?: RootSeen[];
+  /** The plans the account pays for, as Paddle last said of each. An older server says nothing. */
+  subscriptions?: SubscriptionView[];
+  /** Its emergency access: whom it named, and who named it. An older server says nothing. */
+  emergency?: ExportedEmergency;
+  /** Whether its address is watched for breaches, and what was found; null when it is not. An older server says nothing. */
+  breachWatch?: ExportedBreachWatch | null;
+}
+
+export interface ExportedBreachWatch {
+  watchingSince: number;
+  checkedAt: number | null;
+  breaches: { name: string; title: string; breachDate: string }[];
+}
+
+/** Emergency access as `GET /account/export` writes it: who, what and when, never a key, a pin or a box. */
+export interface ExportedEmergency {
+  /** Since when the account has a contact key; null for none. */
+  contactKeySince: number | null;
+  /** Those the account named. */
+  named: ExportedEmergencyGrant[];
+  /** Those who named the account, by its address until it accepts. */
+  namedBy: ExportedEmergencyGrant[];
+}
+
+export interface ExportedEmergencyGrant {
+  /** The other person: the address named, and their name once the account is known. */
+  person: { email: string; name: string | null };
+  waitDays: number;
+  /** The products whose data the contact may read. */
+  products: string[];
+  namedAt: number;
+  acceptedAt: number | null;
+  requestedAt: number | null;
+  refusedAt: number | null;
+  /** When what was handed over was first given to the contact. */
+  releasedAt: number | null;
 }
 
 /** A family the account is in, as `GET /account/export` writes it: nothing in it is sealed, and nothing opens anything. */
@@ -668,15 +723,6 @@ export interface ExportedOrg {
   people: { email: string; name: string | null; role: OrgRole; status: OrgMemberStatus }[];
   /** The shared collections it holds a key to, and how many entries each syncs. Their names are encrypted, and not here. */
   collections: { product: string; createdAt: number; entries: number }[];
-  /** Its emergency access, with the times kept: as `grantor`, the contact it named; as `contact`, each who named it theirs. */
-  emergency: {
-    as: 'contact' | 'grantor';
-    person: { email: string; name: string | null };
-    waitDays: number;
-    requestedAt: number | null;
-    refusedAt: number | null;
-    releasedAt: number | null;
-  }[];
   /**
    * Recovery by an organiser: whether it is on for the family; since when the
    * account's root is kept for its organisers, sealed; and whether the account,
@@ -755,9 +801,9 @@ export interface ActivityResponse {
 // --- POST /account/email/begin, POST /account/email -------------------------
 
 /**
- * Moving the account to a new address, on the owner's
- * proof as for any change to how the account is reached. A code goes to the
- * new address; the answer is the same whether that address is free or not.
+ * Moving the account to a new address, on the owner's proof as for any change
+ * to how the account is reached. A code goes to the new address; the answer is
+ * the same whether that address is free or not.
  */
 export interface EmailChangeBeginRequest extends OwnerProofFields {
   email: string;
@@ -954,6 +1000,50 @@ export interface PushRequest {
   baseServerRev: number;
 }
 
+/**
+ * `POST /files`: room for a sealed file of `size` bytes, in the person's own
+ * files or, with both family fields, a family's shared collection.
+ */
+export interface BeginFileRequest {
+  id: string;
+  size: number;
+  orgId?: string;
+  collectionId?: string;
+}
+
+/** Where the device puts the file, and until when. */
+export interface BeginFileResponse {
+  url: string;
+  expiresAt: number;
+}
+
+/** A file as its owner sees it. Nothing here opens it, or says what it is. */
+export interface FileView {
+  id: string;
+  size: number;
+  createdAt: number;
+  /** Whether the store holds it yet. */
+  uploaded: boolean;
+  /** The family's collection it is in, for a family's. */
+  collectionId: string | null;
+  /** Kept with what an account held before it started over; it counts against no room. */
+  archived: boolean;
+}
+
+export interface FilesResponse {
+  files: FileView[];
+  /** Bytes taken, and the bytes the plan holds; 0 for a plan that keeps none. */
+  used: number;
+  allowance: number;
+}
+
+/** Where the device reads a file, and until when. */
+export interface FileAddress {
+  url: string;
+  size: number;
+  expiresAt: number;
+}
+
 export interface PushResponse {
   accepted: { id: string; rev: number; serverRev: number }[];
   /** Records the server refused because it holds a newer revision. */
@@ -995,8 +1085,8 @@ export type SyncErrorCode =
    */
   | 'device_removed'
   /**
-   * A 404 for what this server does not offer yet, such as families while
-   * they are off: nothing to retry until it says otherwise.
+   * A 404 for what this server does not offer yet, such as families: nothing
+   * to retry until it says otherwise.
    */
   | 'not_offered';
 
@@ -1053,20 +1143,19 @@ export interface AccountKeysResponse {
   /**
    * The name the person gave the account, as at sign-in (`account.name`), so
    * a product that rarely signs in again keeps up with one changed on the
-   * page. Shown as text, never a sign of who anyone is. An older server says nothing.
+   * page. Shown as text, never a sign of who anyone is. An older server says
+   * nothing.
    */
   name?: string | null;
   /**
    * The account's address now, for the same reason: it may have changed on
-   * the page since this product signed in. An older server
-   * says nothing.
+   * the page since this product signed in. An older server says nothing.
    */
   email?: string;
   /**
    * The member key of each organisation the account is in, sealed under this
    * product's key (`PUT /orgs/:org/me/boxes/:product`): what a device seals
-   * again to a new root when it replaces it. A server from before migration
-   * 14 says nothing.
+   * again to a new root when it replaces it. An older server says nothing.
    */
   memberKeyBoxes?: { orgId: string; box: OrgBox }[];
   /** Who else opened the account's root, until it is replaced: this product asks for that too. An older server says nothing. */
@@ -1424,7 +1513,79 @@ export interface DeleteArchiveRequest {
   keyCheck?: string;
 }
 
-// --- /orgs: families -------------------------------------
+// --- /account/billing: the plans Paddle and the App Store sell ----------------
+
+/** A plan a person pays for, as the store that sold it last said of it. */
+export interface SubscriptionView {
+  /** The store's id for it: Paddle's, or `apple_` and the App Store's original transaction. */
+  id: string;
+  /**
+   * Who sold it: Paddle, on the web, whose own page changes it; or Apple,
+   * in an app, where only the person's Apple account settings change or
+   * cancel it.
+   */
+  store: 'paddle' | 'apple';
+  plan: 'personal' | 'family';
+  /** The family it is for; null for a person's plan, or a family that is gone. */
+  orgId: string | null;
+  /**
+   * In Paddle's words, whichever store: `active`, `trialing`, `past_due` and
+   * the plan holds; `paused` or `canceled` and it does not.
+   */
+  status: string;
+  /** When it is next paid for; null when it is not. */
+  renewsAt: number | null;
+  /** When it ends, once cancelled; null while it renews. */
+  endsAt: number | null;
+}
+
+/** `GET /account/billing`: what the person's plans hold and what they pay for. Any product may read it. */
+export interface BillingView {
+  /** Whether this server sells plans now, on the account page. A plan sold before is honoured either way. */
+  offered: boolean;
+  /**
+   * The App Store products an app sells the plans as, through Apple's
+   * in-app purchase, while it does; null while it does not.
+   */
+  appStore: { personal: string; family: string } | null;
+  /** The person's own plan: paid for by them, or by a family they are in. */
+  personal: 'free' | 'paid';
+  /** Each family the person is in, its plan, and whether they may buy one for it. */
+  families: { orgId: string; name: string; organiser: boolean; plan: 'free' | 'paid' }[];
+  /** What the person pays for, not counting what has ended. */
+  subscriptions: SubscriptionView[];
+}
+
+/** `POST /account/billing/checkout`, from the account page alone: a plan for oneself, or for a family one organises. */
+export type CheckoutRequest = { plan: 'personal' } | { plan: 'family'; orgId: string };
+
+/**
+ * Where to pay: Paddle's checkout, on the payment page, never on the account
+ * page. `POST /account/billing/manage` answers the same for the person's own
+ * page at Paddle, a few minutes long.
+ */
+export interface BillingLink {
+  url: string;
+}
+
+/**
+ * `POST /account/billing/apple`, from an app, with a `CheckoutRequest`: what
+ * to buy through Apple's in-app purchase. The token goes to StoreKit as the
+ * purchase's `appAccountToken`; Apple hands it back with every transaction of
+ * the subscription, and it names whom the plan is for. Asked again for the
+ * same plan, it is the same.
+ */
+export interface AppleCheckout {
+  productId: string;
+  appAccountToken: string;
+}
+
+/** `POST /account/billing/manage`: the plan to change, cancel, or see receipts of. */
+export interface ManageBillingRequest {
+  subscription: string;
+}
+
+// --- /orgs: families ----------------------------------------------------------
 
 /**
  * A box a device sealed: to a member's key, or under a key the server never
@@ -1523,17 +1684,17 @@ export interface OrgInvite {
 }
 
 /**
- * What a family's plan lets it do.
- * The server's word, which it holds itself to: it decides what a person is
- * offered, and nothing a device opens or trusts.
+ * What a family's plan lets it do. The server's word, which it holds itself
+ * to: it decides what a person is offered, and nothing a device opens or
+ * trusts.
  */
 export interface FamilyAllowance {
   /** Live collections, every product's together. What is past it stays; only a new one is refused. */
   collections: number;
-  /** Naming an emergency contact. One named already stays. */
-  emergencyAccess: boolean;
   /** An organiser turning on recovery for the family. Once on, it stays. */
   memberRecovery: boolean;
+  /** Letting someone into a shared vault to view it only. Those set already stay as they are. An older server says nothing, which is no. */
+  viewOnly?: boolean;
 }
 
 /** `GET /orgs/:org`: the organisation as one of its people sees it, with their own boxes. */
@@ -1565,8 +1726,6 @@ export interface OrgDetail {
   invites?: OrgInvite[];
   /** Every collection to an organiser, who lets people in and out and rotates; to anyone else, those they hold a key of. */
   collections: OrgCollection[];
-  /** Emergency access in a family: the contact the caller named, and those who named the caller. */
-  emergency: { given: OrgEmergency | null; received: OrgEmergency[] };
   /** An organiser recovering a member. */
   recovery: OrgRecovery;
 }
@@ -1602,24 +1761,6 @@ export interface OrgRecoveryRequest {
   handedBy: string | null;
 }
 
-/**
- * Emergency access between two members of a family, as either sees it. The
- * box itself is handed over only by `GET /orgs/:org/emergency/:grantor`,
- * once the wait is over and nobody refused.
- */
-export interface OrgEmergency {
-  grantorId: string;
-  granteeId: string;
-  /** When the contact asked; null until they do. */
-  requestedAt: number | null;
-  /** When the one who named them refused the latest request. */
-  refusedAt: number | null;
-  /** When the box may be handed over, if nobody refuses before: the request and the wait. */
-  opensAt: number | null;
-  /** When it was first handed over. */
-  releasedAt: number | null;
-}
-
 /** A shared collection: its name sealed under its own key, and whose keys it is under, never what is in it. */
 export interface OrgCollection {
   id: string;
@@ -1633,6 +1774,14 @@ export interface OrgCollection {
   holders: string[];
   /** Who holds it, under its key of `generation` (`keyrook.collection-holders:v1:<org>:<collection>:<generation>`). Absent from one made before there was any. */
   holdersBox?: OrgBox;
+  /**
+   * View only is on: each generation from then has a write key, and those it
+   * lists may only view. The server's word, for what the page shows; a device
+   * takes who may edit from its own access box and the signed list of holders.
+   * An older server says nothing, which is off.
+   */
+  viewOnly?: boolean;
+  viewers?: string[];
 }
 
 /** `POST /orgs/:org/invites`: an address, mailed. No secret goes with it: the account that proves the address finds it. */
@@ -1658,7 +1807,7 @@ export interface ConfirmOrgMemberRequest {
   /** The organisation key, sealed to the member's key, for the generation in use. */
   orgKeyBox: OrgBox;
   /** A key for each collection they are let into, of its generation in use. */
-  collectionKeyBoxes: { collectionId: string; generation: number; box: OrgBox; holdersBox?: OrgBox }[];
+  collectionKeyBoxes: { collectionId: string; generation: number; box: OrgBox; holdersBox?: OrgBox; viewer?: boolean }[];
   /** Invited as an organiser while recovery is on: the recovery key sealed to them, as `OrgRoleRequest` has. */
   recoveryKeyBox?: OrgBox;
   /**
@@ -1696,7 +1845,7 @@ export interface RotateOrgRequest {
   generation: number;
   roster: OrgRoster;
   orgKeyBoxes: { accountId: string; box: OrgBox }[];
-  collections: { collectionId: string; generation: number; nameBox: OrgBox; holdersBox?: OrgBox; keyBoxes: { accountId: string; box: OrgBox }[] }[];
+  collections: { collectionId: string; generation: number; nameBox: OrgBox; holdersBox?: OrgBox; keyBoxes: { accountId: string; box: OrgBox }[]; viewers?: string[] }[];
 }
 
 /**
@@ -1732,6 +1881,8 @@ export interface CreateCollectionRequest {
   nameBox: OrgBox;
   holdersBox?: OrgBox;
   keyBoxes: { accountId: string; box: OrgBox }[];
+  /** With view only on: those of `keyBoxes` who may only view, none an organiser. Absent, it is off. */
+  viewers?: string[];
 }
 
 /** `PUT /orgs/:org/collections/:id`: a new name, sealed under the key in use. */
@@ -1749,6 +1900,15 @@ export interface CollectionKeysRequest {
   keyBoxes: { accountId: string; generation: number; box: OrgBox }[];
   /** Who holds it now, those let in too. */
   holdersBox?: OrgBox;
+  /** Of those let in, who may only view, where view only is on. */
+  viewers?: string[];
+}
+
+/** `PUT /orgs/:org/collections/:id/editors/:account`: someone who could only view may edit, from an organiser's access box with the private half. */
+export interface CollectionEditorRequest {
+  generation: number;
+  box: OrgBox;
+  holdersBox: OrgBox;
 }
 
 /**
@@ -1763,6 +1923,8 @@ export interface RotateCollectionRequest {
   nameBox: OrgBox;
   holdersBox?: OrgBox;
   keyBoxes: { accountId: string; box: OrgBox }[];
+  /** Who may only view from this generation: view only turned on, or someone who could edit made a viewer. Absent, as they were. */
+  viewers?: string[];
 }
 
 /**
@@ -1800,29 +1962,14 @@ export interface OrgPushResponse {
   /** Records the server refused because it holds a newer revision. */
   conflicts: OrgRecord[];
   serverRev: number;
+  /** Set when a push was trimmed by the family's ceiling on what it shares. The device keeps those. */
+  rejectedForLimit?: { id: string }[];
 }
 
 /**
- * `PUT /orgs/:org/emergency`: the caller's root, sealed by their own device to
- * a confirmed, verified member of the same family, in a box from their member
- * key (`sealEmergencyBox`). It replaces any contact named before, and any
- * request of theirs.
- */
-export interface OrgEmergencyRequest {
-  grantee: string;
-  box: OrgBox;
-}
-
-/** `GET /orgs/:org/emergency/:grantor`: the box, once the wait is over and nobody refused. */
-export interface OrgEmergencyBox {
-  grantorId: string;
-  granteeId: string;
-  box: OrgBox;
-}
-
-/**
- * `POST /orgs/:org/recovery`: an organiser turns recovery on. The next recovery key, sealed to every confirmed organiser, the caller
- * too; the roster one version up, listing its public half.
+ * `POST /orgs/:org/recovery`: an organiser turns recovery on. The next
+ * recovery key, sealed to every confirmed organiser, the caller too; the
+ * roster one version up, listing its public half.
  */
 export interface OrgRecoveryOnRequest {
   generation: number;
@@ -1939,3 +2086,190 @@ export interface FamilyRecoveryFinishRequest {
   deviceId: string;
   deviceName: string;
 }
+
+/** The waits a grantor may choose between asking and access, in days. */
+export const EMERGENCY_WAITS = [1, 3, 7, 14, 30] as const;
+export type EmergencyWait = (typeof EMERGENCY_WAITS)[number];
+
+/**
+ * One grant of emergency access between two accounts, as either side sees it.
+ * `other*` is the other side: the contact for the grantor, the grantor for the
+ * contact. Their key is the server's word until the two compared the code.
+ */
+export interface EmergencyGrant {
+  id: string;
+  grantorId: string;
+  /** Null until the person named accepts. */
+  contactId: string | null;
+  otherEmail: string;
+  otherName: string | null;
+  /** The other side's contact key, once both have one and the contact accepted. */
+  otherKey: string | null;
+  waitDays: EmergencyWait;
+  /** The products whose keys are handed over, in the grantor's choice. */
+  products: string[];
+  /** The products a handover box is waiting for. */
+  boxes: string[];
+  createdAt: number;
+  acceptedAt: number | null;
+  requestedAt: number | null;
+  refusedAt: number | null;
+  releasedAt: number | null;
+  /** When access opens if nobody refuses: the request and the wait. */
+  opensAt: number | null;
+}
+
+/** `GET /emergency`: the caller's contact key, pins, whom they named and who named them. */
+export interface EmergencyState {
+  /**
+   * The caller's contact key, sealed for this session: under its product's
+   * key, or to the root for the account page, which is also given every
+   * product's box of it, to open the key by once the root was replaced.
+   */
+  myKey: { publicKey: string; box: OrgBox | null; productBoxes?: { product: string; box: OrgBox }[] } | null;
+  /** The caller's own pins of others' keys: each sealed under one of their products' keys. */
+  pins: { contactId: string; product: string; box: OrgBox }[];
+  named: EmergencyGrant[];
+  namedMe: EmergencyGrant[];
+}
+
+/** `PUT /emergency/key`: the caller's contact key, the first time, or another box of the same key. */
+export interface EmergencyKeyRequest {
+  publicKey: string;
+  /** The private half sealed to the root: required the first time, and sent again once the root was replaced. */
+  rootBox?: OrgBox;
+  /** The private half under each product's key the caller holds. */
+  productBoxes?: { product: string; box: OrgBox }[];
+}
+
+/** `POST /emergency/contacts`: naming someone, by address. */
+export interface EmergencyNameRequest {
+  email: string;
+  waitDays: EmergencyWait;
+  products: string[];
+}
+
+/** `PATCH /emergency/contacts/:id`: the wait, or the products, changed. */
+export interface EmergencyChangeRequest {
+  waitDays?: EmergencyWait;
+  products?: string[];
+}
+
+/** `GET /emergency/named-by/:grantor/sync`: the grantor's records of one product, read only. */
+export interface EmergencyPullResponse {
+  records: RemoteRecord[];
+  serverRev: number;
+  hasMore: boolean;
+}
+
+/** `POST /breach/ranges`: the first five characters of passwords' SHA-1, in upper-case hex. The passwords never leave the device. */
+export interface BreachRangesRequest {
+  prefixes: string[];
+}
+
+/** By prefix: every suffix Pwned Passwords knows under it, `SUFFIX:COUNT` a line, padded with lines of count 0. */
+export interface BreachRangesResponse {
+  ranges: Record<string, string>;
+}
+
+/** A breach an address is in, as Have I Been Pwned published it. */
+export interface BreachView {
+  /** Its name there, which stays the same. */
+  name: string;
+  title: string;
+  /** The site's domain; empty for none. */
+  domain: string;
+  /** `YYYY-MM-DD`; empty when not known. */
+  breachDate: string;
+  /** What was taken: "Email addresses", "Passwords" and the like. */
+  dataClasses: string[];
+}
+
+/** `GET /breach/account`: whether the account's address is watched, and the breaches it was found in. */
+export interface BreachWatchState {
+  /** Whether this server can watch an address at all. */
+  offered: boolean;
+  /** Since when it is watched; null when it is not. */
+  watchingSince: number | null;
+  /** When it was last looked up; null before the first. */
+  checkedAt: number | null;
+  breaches: BreachView[];
+}
+
+/** `PUT /breach/account`: watch the account's address, or stop. */
+export interface BreachWatchRequest {
+  watch: boolean;
+}
+
+/** `POST /sends`: a Send, its body sealed, the hash of its access token, and the size of each file it holds, sealed. */
+export interface SendRequest {
+  id: string;
+  body: OrgBox;
+  accessHash: string;
+  /** From 1 to 100. */
+  opens: number;
+  /** How long it lives, in milliseconds: from an hour to 30 days. */
+  lifetime: number;
+  files: { id: string; size: number }[];
+}
+
+/** What `POST /sends` answers: where to put each file, and the Send as it stands. */
+export interface SendCreated {
+  send: SendView;
+  uploads: { id: string; url: string; expiresAt: number }[];
+}
+
+/** A Send as its sender sees it. Nothing of what it holds. */
+export interface SendView {
+  id: string;
+  opensLeft: number;
+  expiresAt: number;
+  createdAt: number;
+  /** Its files, sealed, together. */
+  size: number;
+  /** Whether every file is in place, so it opens. */
+  ready: boolean;
+  /** When someone reported it, which stopped it; null for never. */
+  reportedAt: number | null;
+}
+
+/** `POST /sends/:id/open`: the access token, which only the link, and its password, make. */
+export interface SendOpenRequest {
+  access: string;
+}
+
+/** What one open hands over: the sealed body, and where to read each file for a few minutes. */
+export interface SendOpened {
+  body: OrgBox;
+  files: { id: string; url: string; size: number }[];
+  opensLeft: number;
+  expiresAt: number;
+}
+
+/** `POST /sends/:id/report`: the access token, so only someone with the link reports it, and why, in their words. */
+export interface SendReportRequest {
+  access: string;
+  reason: string;
+}
+
+/**
+ * `GET /links/:link`: a link between two of the account's products, as one
+ * side, or the page, sees it: the box of the link key under the session's
+ * own product's key (none for the page, which holds no product's key and
+ * only seals them), and where its records stand.
+ */
+export interface LinkState {
+  link: string;
+  /** The products that have a box; both, once it is turned on. */
+  products: string[];
+  boxes: { product: string; box: OrgBox }[];
+  serverRev: number;
+  epoch: string;
+  createdAt: number;
+}
+
+/** `PUT /links/:link`: the page turning a link on, a box for each side; or one side sealing its own again under a new key. */
+export interface LinkBoxesRequest {
+  boxes: { product: string; box: OrgBox }[];
+}
+

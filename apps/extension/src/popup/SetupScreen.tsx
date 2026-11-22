@@ -3,6 +3,7 @@ import { accountPasskeySalt, MIN_MASTER_PASSWORD } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import { send } from '../lib/messaging.js';
 import { onEdge } from '../lib/name.js';
+import { isFirefox } from '../lib/platform.js';
 import { DEVICE_METHOD, deviceKind, enrollDevice } from '../ui/device.js';
 import { useAction } from '../ui/hooks.js';
 import { FingerprintIcon } from '../ui/icons.js';
@@ -156,7 +157,8 @@ export function SetupScreen({
             {joined !== null ? t('join.lockBodyDevice', { method }) : t('setup.deviceBody', { method })}
           </p>
         </div>
-        {(deviceKind() === 'mac' || passkeyFirst) && (
+        {/* Where Chrome or Edge asks to save it; Firefox asks nothing of the kind, so names neither. */}
+        {(deviceKind() === 'mac' || passkeyFirst) && !isFirefox() && (
           <p className="rounded-xl bg-neutral-100 px-3 py-2.5 text-[12.5px] leading-relaxed text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
             {t(onEdge() ? 'setup.deviceWhereMacEdge' : 'setup.deviceWhereMac')}
           </p>

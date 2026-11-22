@@ -12,6 +12,7 @@ import {
 import { useT } from '../i18n/react.js';
 import { send, type SecurityKey } from '../lib/messaging.js';
 import { onEdge } from '../lib/name.js';
+import { isFirefox } from '../lib/platform.js';
 import { DEVICE_METHOD, deviceKind, enrollDevice, enrollKey, forgetCredential } from '../ui/device.js';
 import { KeyIcon } from '../ui/icons.js';
 import { useAction } from '../ui/hooks.js';
@@ -501,7 +502,7 @@ function Device({
       description={
         <>
           {passwordless ? (on ? t('device.isTheWayIn') : t('device.setUpHere', { method })) : t('device.body')}
-          {!on && deviceKind() === 'mac' && <span className="mt-1 block">{t(onEdge() ? 'device.whereMacEdge' : 'device.whereMac')}</span>}
+          {!on && deviceKind() === 'mac' && !isFirefox() && <span className="mt-1 block">{t(onEdge() ? 'device.whereMacEdge' : 'device.whereMac')}</span>}
         </>
       }
       control={

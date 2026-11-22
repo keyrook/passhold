@@ -1,21 +1,26 @@
-import { useMemo } from 'react';
-import { changePasswordUrl, checkup, type DeviceCredential, type LoginItem, type VaultData, type VaultSecret } from '@passhold/core';
+import { useMemo, useState } from 'react';
+import { apiService, changePasswordUrl, checkup, type ApiKeyItem, type DeviceCredential, type LoginItem, type VaultData, type VaultSecret } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import { DEVICE_METHOD, deviceKind } from '../ui/device.js';
 import { ExternalIcon, ShieldCheckIcon, WarningIcon } from '../ui/icons.js';
-import { Button, cx } from '../ui/primitives.js';
+import { send } from '../lib/messaging.js';
+import { usePlan } from '../ui/plan.js';
+import { useAction } from '../ui/hooks.js';
+import { Button, Callout, cx } from '../ui/primitives.js';
 import { SiteMark } from '../ui/SiteMark.js';
+import { expiryWords, walletName } from '../ui/wallet.js';
+import { ApiKeyMark } from '../ui/WalletMark.js';
 import { Muted, Row, Section, StateDot } from './Section.js';
 
 /** A login with the way to change its password on the site itself. */
-function LoginRow({ item }: { item: LoginItem }) {
+function LoginRow({ item, note }: { item: LoginItem; note?: string }) {
   const t = useT();
   const change = changePasswordUrl(item);
   return (
     <Row
       leading={<SiteMark title={item.title} urls={item.urls} size={32} />}
       label={item.title || item.username}
-      description={item.title && item.username ? item.username : undefined}
+      description={[item.title && item.username ? item.username : '', note ?? ''].filter(Boolean).join(' · ') || undefined}
       control={
         change && (
           <a
@@ -33,9 +38,85 @@ function LoginRow({ item }: { item: LoginItem }) {
   );
 }
 
+/** An API key running out, with the way to its service's own page for a new one. */
+function KeyRow({ item }: { item: ApiKeyItem }) {
+  const t = useT();
+  const replace = apiService(item.service)?.replace;
+  return (
+    <Row
+      leading={<ApiKeyMark service={item.service} size={32} />}
+      label={walletName(item, t)}
+      description={expiryWords(item, t)}
+      control={
+        replace && (
+          <a
+            href={replace}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-500/10"
+          >
+            {t('checkup.change')}
+            <ExternalIcon className="h-3.5 w-3.5" />
+          </a>
+        )
+      }
+    />
+  );
+}
+
+/**
+ * The breach check, run only when asked: each password's SHA-1 is made in
+ * the service worker, and only its first five characters go to Keyrook, which
+ * asks Pwned Passwords; the rest is matched there, on this computer.
+ */
+function Breach({ data }: { data: VaultData }) {
+  const t = useT();
+  const plan = usePlan();
+  const [exposed, setExposed] = useState<{ item: LoginItem; count: number }[] | null>(null);
+  const { busy, error, run } = useAction();
+  const check = () =>
+    void run(async () => {
+      const answer = await send({ type: 'checkup/breach' });
+      setExposed(answer.exposed.flatMap(({ id, count }) => data.items.filter((item) => item.id === id).map((item) => ({ item, count }))));
+    });
+  return (
+    <Section
+      title={t('checkup.breach')}
+      description={t('checkup.breachBody')}
+      action={
+        // No button on a plan without it: said here, before anything is pressed.
+        plan.breach && (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={check} data-testid="breach-check">
+            {t('checkup.breachCheck')}
+          </Button>
+        )
+      }
+    >
+      {!plan.breach && <Row label={<Muted>{t('checkup.breachPremium')}</Muted>} />}
+      {error && (
+        <div className="px-4 py-3">
+          <Callout tone="danger">{error}</Callout>
+        </div>
+      )}
+      {exposed?.length === 0 && (
+        <Row
+          label={
+            <span className="flex items-center">
+              <StateDot good />
+              {t('checkup.breachNone')}
+            </span>
+          }
+        />
+      )}
+      {exposed?.map(({ item, count }) => <LoginRow key={item.id} item={item} note={t('checkup.breachSeen', { count: count.toLocaleString(t.locale) })} />)}
+    </Section>
+  );
+}
+
 /**
  * What needs doing, in Passwords under "Needs attention". Everything is worked
- * out here from the vault; nothing is sent anywhere to find it.
+ * out here from the vault, and nothing is sent anywhere to find it — but the
+ * breach check, which its owner runs.
  */
 export function CheckupPanel({
   data,
@@ -54,6 +135,7 @@ export function CheckupPanel({
   onSecurity: () => void;
 }) {
   const t = useT();
+  const plan = usePlan();
   const result = useMemo(() => checkup(data, Date.now(), linked), [data, linked]);
   const when = new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium' });
   const method = t(DEVICE_METHOD[deviceKind()]);
@@ -149,7 +231,19 @@ export function CheckupPanel({
           ))}
       </Section>
 
-      <Muted>{t('checkup.limits')}</Muted>
+      {result.expiring.length > 0 && (
+        <Section title={t('checkup.apiKeys')} description={t('checkup.apiKeysBody')}>
+          {result.expiring.map((item) => (
+            <KeyRow key={item.id} item={item} />
+          ))}
+        </Section>
+      )}
+
+      {/* Nothing of a paid plan shows until plans are sold, not even that it is part of one. */}
+      {linked && (plan.breach || plan.offered) && <Breach data={data} />}
+
+      {/* Signed in, the breach check is above: the limits it states are those of a Passhold with no account. */}
+      {!linked && <Muted>{t('checkup.limits')}</Muted>}
     </>
   );
 }

@@ -4,10 +4,21 @@ import { LOCALE_NAMES, LOCALES } from '../i18n/locales.js';
 import { useT } from '../i18n/react.js';
 import { currentPreference, setLanguage, type LanguagePreference } from '../i18n/runtime.js';
 import { send } from '../lib/messaging.js';
+import { onEdge } from '../lib/name.js';
 import { useAction } from '../ui/hooks.js';
+import { ExternalIcon } from '../ui/icons.js';
 import { Button, Callout } from '../ui/primitives.js';
 import { currentTheme, setTheme, type ThemePreference } from '../ui/theme.js';
 import { Choice, Muted, PageHeader, Row, Section, Switch } from './Section.js';
+
+/**
+ * The browser's own password settings, where its offer to save is turned off.
+ * Passhold could turn it off itself only with the `privacy` permission, which
+ * Chrome words as changing privacy settings: for a password manager, a request
+ * worse than the two prompts. A page cannot link there either; the extension
+ * opens it as a tab.
+ */
+const BROWSER_PASSWORDS = { chrome: 'chrome://password-manager/settings', edge: 'edge://settings/passwords' };
 
 export function GeneralPanel({ data }: { data: VaultData }) {
   const t = useT();
@@ -31,6 +42,15 @@ export function GeneralPanel({ data }: { data: VaultData }) {
         <Row
           label={t('settings.offerToSave')}
           control={<Switch label={t('settings.offerToSave')} checked={settings.offerToSave} onChange={(offerToSave) => update({ offerToSave })} />}
+        />
+        <Row
+          label={t('general.browserSaving')}
+          description={t('general.browserSavingBody')}
+          control={
+            <Button size="sm" onClick={() => void chrome.tabs.create({ url: onEdge() ? BROWSER_PASSWORDS.edge : BROWSER_PASSWORDS.chrome })}>
+              {t('general.browserSavingOpen')} <ExternalIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            </Button>
+          }
         />
         <Row
           label={t('settings.offerToSaveCards')}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { accountPasskeySalt, strongEnoughForAccount, type DeviceCredential, type VaultSecret } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import { BackgroundError, send, type AccountView, type ArchiveView, type SecondStepAnswer, type SecurityKey, type SyncResult } from '../lib/messaging.js';
-import { deviceUnsupported, onEdge } from '../lib/name.js';
+import { deviceUnsupported, keepsInGoogle } from '../lib/name.js';
 import { askPasskey, enrollDevice, forgetCredential } from '../ui/device.js';
 import { useAction } from '../ui/hooks.js';
 import { useProof } from '../ui/Proof.js';
@@ -891,7 +891,7 @@ function PasskeyRow({ account, device }: { account: AccountView; device: DeviceC
           {account.passkey ? t('passkey.onLabel') : t('passkey.offLabel')}
         </span>
       }
-      description={t(onEdge() ? 'passkey.bodyEdge' : 'passkey.body', { provider })}
+      description={t(keepsInGoogle() ? 'passkey.body' : 'passkey.bodyEdge', { provider })}
       control={
         account.passkey ? (
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => send({ type: 'passkey/remove' }))}>

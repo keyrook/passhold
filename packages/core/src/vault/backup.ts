@@ -8,6 +8,10 @@
  * checked, KDF bounded, payload sanitised, and only known fields kept.
  */
 import { PassholdError, isPassholdError } from '../errors.js';
+import { canonical } from './canonical.js';
+import { joinVersions } from './versions.js';
+import { attachmentsOf, withJoinedFiles } from './attachments.js';
+export { canonical };
 import { HISTORY_LIMIT, isVaultFile, type CustomField, type LoginItem, type PasswordChange, type VaultData, type VaultFile, type WalletItem } from './model.js';
 import { unlockVault, type UnlockedVault } from './vault.js';
 
@@ -63,28 +67,25 @@ export async function openBackup(text: string, password: string): Promise<Unlock
   }
 }
 
-/**
- * Keys in one order whatever order an item was built in, so the same item
- * always hashes the same — at every depth: a list of keys handed to
- * JSON.stringify would drop every key of a field not also a key of the item,
- * and a field's new value would never be seen, nor sent.
- */
-export const canonical = (item: object) =>
-  JSON.stringify(item, (_, value: unknown) =>
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : value,
-  );
+
+/** What a copy of an item holds in secret now, and held before: a login's password, an API key's key. */
+interface Secrets {
+  secret: string;
+  history: PasswordChange[];
+  updatedAt: number;
+}
+
+const loginSecrets = (item: LoginItem): Secrets => ({ secret: item.password, history: item.history, updatedAt: item.updatedAt });
 
 /**
  * The newer copy's history, plus every password only the other copy knew —
  * its current one first. The newer history is kept exactly as it is, so
  * joining a login with itself changes nothing.
  */
-function joinHistory(winner: LoginItem, loser: LoginItem): PasswordChange[] {
-  const known = new Set([winner.password, ...winner.history.map((entry) => entry.password)]);
+function joinHistory(winner: Secrets, loser: Secrets): PasswordChange[] {
+  const known = new Set([winner.secret, ...winner.history.map((entry) => entry.password)]);
   const others: PasswordChange[] = [];
-  for (const entry of [{ password: loser.password, changedAt: winner.updatedAt }, ...loser.history]) {
+  for (const entry of [{ password: loser.secret, changedAt: winner.updatedAt }, ...loser.history]) {
     if (!entry.password || known.has(entry.password)) continue;
     known.add(entry.password);
     others.push(entry);
@@ -97,33 +98,55 @@ function joinHistory(winner: LoginItem, loser: LoginItem): PasswordChange[] {
 /** One login as both copies know it: the newer edit, and the passwords either had. */
 export function joinLogin(here: LoginItem, there: LoginItem): LoginItem {
   const [winner, loser] = there.updatedAt > here.updatedAt ? [there, here] : [here, there];
-  return {
-    ...winner,
-    createdAt: Math.min(here.createdAt, there.createdAt),
-    lastUsedAt: Math.max(here.lastUsedAt ?? 0, there.lastUsedAt ?? 0) || null,
-    history: joinHistory(winner, loser),
-    // A passkey is a key no site can hand back: one copy without it never takes it from the other.
-    passkey: winner.passkey ?? loser.passkey,
-  };
+  // A file's key is as irreplaceable as a passkey: the newer edit never takes one from the older.
+  return withJoinedFiles(
+    {
+      ...winner,
+      createdAt: Math.min(here.createdAt, there.createdAt),
+      lastUsedAt: Math.max(here.lastUsedAt ?? 0, there.lastUsedAt ?? 0) || null,
+      history: joinHistory(loginSecrets(winner), loginSecrets(loser)),
+      // A passkey is a key no site can hand back: one copy without it never takes it from the other.
+      passkey: winner.passkey ?? loser.passkey,
+      ...versionsOfBoth(winner, loser),
+    },
+    here,
+    there,
+  );
 }
 
-/** One card, address or note as both copies know it: the newer edit, wholly. */
+/** The versions either copy kept, and none at all where neither kept any. */
+function versionsOfBoth<T extends LoginItem | WalletItem>(winner: T, loser: T): Pick<T, 'versions'> {
+  const versions = joinVersions<object>(winner.versions, loser.versions);
+  return (versions ? { versions } : {}) as Pick<T, 'versions'>;
+}
+
+/** One card, address or note as both copies know it: the newer edit, wholly — and of an API key, the keys either held. */
 export function joinWalletItem(here: WalletItem, there: WalletItem): WalletItem {
   const winner = there.updatedAt > here.updatedAt ? there : here;
-  return {
-    ...winner,
-    createdAt: Math.min(here.createdAt, there.createdAt),
-    lastUsedAt: Math.max(here.lastUsedAt ?? 0, there.lastUsedAt ?? 0) || null,
-  };
+  const loser = winner === here ? there : here;
+  const keys = (item: WalletItem): Secrets | null => (item.kind === 'apikey' ? { secret: item.key, history: item.history, updatedAt: item.updatedAt } : null);
+  const [won, lost] = [keys(winner), keys(loser)];
+  return withJoinedFiles(
+    {
+      ...winner,
+      createdAt: Math.min(here.createdAt, there.createdAt),
+      lastUsedAt: Math.max(here.lastUsedAt ?? 0, there.lastUsedAt ?? 0) || null,
+      ...versionsOfBoth(winner, loser),
+      ...(won ? { history: lost ? joinHistory(won, lost) : won.history } : {}),
+    },
+    here,
+    there,
+  );
 }
 
 /** The same thing written down twice: what it holds, whatever its id, its dates and its folder. */
 function sameWalletItem(a: WalletItem, b: WalletItem): boolean {
-  const content = ({ id: _, favorite: __, createdAt: ___, updatedAt: ____, lastUsedAt: _____, deletedAt: ______, folder: _______, ...rest }: WalletItem) => canonical(rest);
+  const content = ({ id: _, favorite: __, createdAt: ___, updatedAt: ____, lastUsedAt: _____, deletedAt: ______, folder: _______, versions: ________, ...rest }: WalletItem) => canonical(rest);
   return content(a) === content(b);
 }
 
 const sameFields = (a: readonly CustomField[], b: readonly CustomField[]) => canonical(a) === canonical(b);
+const sameFiles = (a: LoginItem, b: LoginItem) => canonical(attachmentsOf(a).map((file) => file.id).sort()) === canonical(attachmentsOf(b).map((file) => file.id).sort());
 
 function sameLogin(a: LoginItem, b: LoginItem): boolean {
   return (
@@ -134,7 +157,9 @@ function sameLogin(a: LoginItem, b: LoginItem): boolean {
     (a.passkey?.credentialId ?? null) === (b.passkey?.credentialId ?? null) &&
     a.urls.length === b.urls.length &&
     a.urls.every((url, index) => url === b.urls[index]) &&
-    sameFields(a.fields, b.fields)
+    sameFields(a.fields, b.fields) &&
+    // Each holds its files' keys: two copies with other files are two logins, or one would lose them.
+    sameFiles(a, b)
   );
 }
 

@@ -20,7 +20,26 @@ async function hasOffscreen(): Promise<boolean> {
   return contexts.length > 0;
 }
 
+/** The alarm that empties the clipboard where there is no offscreen document to wait in. */
+export const CLIPBOARD_ALARM = 'ph.clipboard';
+
+/**
+ * Whether the browser has offscreen documents. Firefox has none, and no need
+ * of one: its background is a page with a clipboard of its own, woken by an
+ * alarm when the time is up.
+ */
+const offscreen = () => typeof chrome.offscreen !== 'undefined';
+
+/** The clipboard emptied from the background page itself: what the alarm calls. */
+export async function clearClipboardNow(): Promise<void> {
+  await navigator.clipboard.writeText('').catch(() => undefined);
+}
+
 export async function clearClipboardLater(afterMs: number): Promise<void> {
+  if (!offscreen()) {
+    await chrome.alarms.create(CLIPBOARD_ALARM, { when: Date.now() + afterMs });
+    return;
+  }
   if (!(await hasOffscreen())) {
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_URL,
@@ -34,12 +53,12 @@ export async function clearClipboardLater(afterMs: number): Promise<void> {
 chrome.runtime.onMessage.addListener((message: unknown, sender) => {
   if (
     sender.id === chrome.runtime.id &&
-    sender.origin === `chrome-extension://${chrome.runtime.id}` &&
+    sender.origin === new URL(chrome.runtime.getURL('')).origin &&
     typeof message === 'object' &&
     message !== null &&
     (message as { type?: unknown }).type === 'offscreen/done'
   ) {
-    void chrome.offscreen.closeDocument().catch(() => undefined);
+    if (offscreen()) void chrome.offscreen.closeDocument().catch(() => undefined);
   }
   return false;
 });

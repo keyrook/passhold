@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useT } from '../i18n/react.js';
-import type { SecondStepAnswer } from '../lib/messaging.js';
+import type { AccountPasskeyTouch, SecondStepAnswer } from '../lib/messaging.js';
 import { touchAccountPasskey } from '../ui/accountPasskey.js';
 import { useAction } from '../ui/hooks.js';
 import { Button, Callout, Field } from '../ui/primitives.js';
@@ -20,12 +20,15 @@ export function SecondStepForm({
   next = false,
   onAnswer,
   onCancel,
+  touch = () => touchAccountPasskey('secondStep'),
 }: {
   passkeys: boolean;
   owner?: boolean;
   next?: boolean;
   onAnswer: (answer: SecondStepAnswer) => Promise<void>;
   onCancel: () => void;
+  /** How one of the account's passkeys is touched: the extension asks for the host permission first; the web vault needs none. */
+  touch?: () => Promise<AccountPasskeyTouch>;
 }) {
   const t = useT();
   const [typed, setTyped] = useState('');
@@ -36,7 +39,7 @@ export function SecondStepForm({
     const digits = typed.replace(/\s/g, '');
     void run(() => onAnswer(/^\d{6}$/.test(digits) ? { code: digits } : { recoveryKey: typed }));
   };
-  const withPasskey = () => void run(async () => onAnswer({ passkey: await touchAccountPasskey('secondStep') }));
+  const withPasskey = () => void run(async () => onAnswer({ passkey: await touch() }));
   return (
     <form onSubmit={submit} className="flex flex-col gap-3" data-testid="second-step">
       <h2 className="text-[17px] font-semibold">{t('secondStep.title')}</h2>

@@ -5,7 +5,7 @@
  * kept nowhere.
  */
 import { cleanDraft } from '../vault/items.js';
-import type { ImportedLogin, LoginDraft, PasskeyFor, StoredPasskey, VaultData, WalletDraft, WalletItem } from '../vault/model.js';
+import type { ApiKeyDraft, ImportedLogin, LoginDraft, PasskeyFor, StoredPasskey, VaultData, WalletDraft, WalletItem } from '../vault/model.js';
 import { cleanWalletDraft } from '../vault/wallet.js';
 
 export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
@@ -22,7 +22,21 @@ export type ImportFormat =
   | 'dashlane'
   | 'proton'
   | 'nordpass'
+  | 'passhold'
   | 'generic';
+
+/**
+ * An entry of the file that looks like an API key — a login whose password
+ * starts as a service's keys do, a note holding a hidden field named like a
+ * key — and the API key it would come as. Its owner ticks which come as keys
+ * (`chooseKeys`); the rest come as what they were.
+ */
+export interface KeyCandidate {
+  /** Where the entry is in the result: `drafts` for a login, `wallet` for a note. */
+  from: 'login' | 'wallet';
+  index: number;
+  draft: ApiKeyDraft;
+}
 
 export interface ImportResult {
   format: ImportFormat;
@@ -36,8 +50,10 @@ export interface ImportResult {
    * for one login. The page says how many, as it does two-step secrets.
    */
   passkeysLeft: number;
-  /** The cards, addresses and notes the file holds, for the wallet. */
+  /** The cards, addresses, notes and API keys the file holds, for the wallet. */
   wallet: WalletDraft[];
+  /** Entries that look like API keys, offered as such (`KeyCandidate`). */
+  keys: KeyCandidate[];
   /** Entries Passhold keeps nothing of — folders, aliases, bank accounts, IDs, SSH keys — or that hold nothing at all. */
   skipped: number;
   /** Entries the vault already holds: a login's site, username and password; a card's number; an address's name and street; a note's words. */
@@ -84,6 +100,7 @@ export function collector(vault: Pick<VaultData, 'items' | 'wallet'>) {
   const drafts: ImportedLogin[] = [];
   const passkeys: PasskeyFor[] = [];
   const wallet: WalletDraft[] = [];
+  const keys: KeyCandidate[] = [];
   let skipped = 0;
   let duplicates = 0;
   let twoFactor = 0;
@@ -94,8 +111,9 @@ export function collector(vault: Pick<VaultData, 'items' | 'wallet'>) {
      * A login, and the website's passkey it held. The same login already
      * here takes the passkey if it has none, so a password saved before and
      * a passkey brought now are one login, as they were in the other manager.
+     * Its place in `drafts` when it comes as a new login; -1 otherwise.
      */
-    login(raw: LoginDraft, held: StoredPasskey | null = null) {
+    login(raw: LoginDraft, held: StoredPasskey | null = null): number {
       let draft: LoginDraft;
       try {
         // A folder or fields the file left empty are no part of what it brings.
@@ -103,7 +121,7 @@ export function collector(vault: Pick<VaultData, 'items' | 'wallet'>) {
         draft = { ...rest, ...(folder ? { folder } : {}), ...(fields?.length ? { fields } : {}) };
       } catch {
         skipped++;
-        return;
+        return -1;
       }
       // A passkey the vault, or this file, has already.
       const passkey = held && !credentials.has(held.credentialId) ? held : null;
@@ -112,15 +130,16 @@ export function collector(vault: Pick<VaultData, 'items' | 'wallet'>) {
       const seen = known.get(print);
       if (seen && !(passkey && seen.passkey)) {
         duplicates++;
-        if (!passkey) return;
+        if (!passkey) return -1;
         seen.passkey = true;
         if (seen.id) passkeys.push({ id: seen.id, passkey });
         else drafts[seen.index] = { ...drafts[seen.index]!, passkey };
-        return;
+        return -1;
       }
       // New, or the same login with another passkey than the one it has: one login per passkey.
       if (!seen) known.set(print, { id: null, index: drafts.length, passkey: passkey !== null });
       drafts.push(passkey ? { ...draft, passkey } : draft);
+      return drafts.length - 1;
     },
     passkeyLeft() {
       passkeysLeft++;
@@ -128,22 +147,30 @@ export function collector(vault: Pick<VaultData, 'items' | 'wallet'>) {
     /**
      * Into the wallet. What does not read as a card or an address is kept as
      * a note of the words it came with, if it has any — in the folder the
-     * file had it in, either way.
+     * file had it in, either way. Its place in `wallet` when it comes; -1 otherwise.
      */
-    keep(draft: WalletDraft | null, title: string, words: string, folder = '') {
+    keep(draft: WalletDraft | null, title: string, words: string, folder = ''): number {
       const filed = draft && draft.folder === undefined && folder ? { ...draft, folder } : draft;
       const clean = (filed && cleanWalletDraft(filed)) ?? (words.trim() ? cleanWalletDraft({ kind: 'note', title, text: words, folder }) : null);
       if (!clean) {
         skipped++;
-        return;
+        return -1;
       }
       const print = walletPrint(clean);
       if (knownWallet.has(print)) {
         duplicates++;
-        return;
+        return -1;
       }
       knownWallet.add(print);
       wallet.push(clean);
+      return wallet.length - 1;
+    },
+    /** An entry kept at `index` that may come as an API key instead, its owner choosing. One the vault holds as a key already is not offered. */
+    offerKey(from: KeyCandidate['from'], index: number, draft: ApiKeyDraft) {
+      if (index < 0) return;
+      const clean = cleanWalletDraft(draft);
+      if (clean?.kind !== 'apikey' || knownWallet.has(walletPrint(clean))) return;
+      keys.push({ from, index, draft: clean });
     },
     skip() {
       skipped++;
@@ -152,7 +179,7 @@ export function collector(vault: Pick<VaultData, 'items' | 'wallet'>) {
       twoFactor++;
     },
     done(format: ImportFormat): ImportResult {
-      return { format, drafts, passkeys, passkeysLeft, wallet, skipped, duplicates, twoFactor };
+      return { format, drafts, passkeys, passkeysLeft, wallet, keys, skipped, duplicates, twoFactor };
     },
   };
 }
@@ -172,5 +199,25 @@ function walletPrint(item: WalletDraft | WalletItem): string {
       return JSON.stringify(['address', low(item.name), low(item.street.split('\n')[0] ?? ''), low(item.postalCode)]);
     case 'note':
       return JSON.stringify(['note', item.title.trim(), item.text.trim()]);
+    case 'ssh':
+      return JSON.stringify(['ssh', item.fingerprint || item.privateKey.trim()]);
+    case 'apikey':
+      // The same key is the same key, whatever it is named or filed under.
+      return JSON.stringify(['apikey', item.key]);
   }
+}
+
+/**
+ * What comes of an import once its owner has ticked which entries come as API
+ * keys (by their place in `keys`): those come as keys, and leave the logins
+ * and notes they were; the rest come as they were.
+ */
+export function chooseKeys(result: Pick<ImportResult, 'drafts' | 'passkeys' | 'wallet' | 'keys'>, chosen: ReadonlySet<number>): { logins: ImportedLogin[]; passkeys: PasskeyFor[]; wallet: WalletDraft[] } {
+  const ticked = result.keys.filter((_, index) => chosen.has(index));
+  const gone = (from: KeyCandidate['from'], index: number) => ticked.some((key) => key.from === from && key.index === index);
+  return {
+    logins: result.drafts.filter((_, index) => !gone('login', index)),
+    passkeys: result.passkeys,
+    wallet: [...result.wallet.filter((_, index) => !gone('wallet', index)), ...ticked.map((key) => key.draft)],
+  };
 }

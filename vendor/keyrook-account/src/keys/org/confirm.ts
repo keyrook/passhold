@@ -1,11 +1,10 @@
 /**
- * The join code: fifteen Crockford characters, 75
- * bits, that two screens show when someone joins. It is the digest of both
- * member keys, the newcomer's and the confirming organiser's, so a server
- * that swapped either one shows two codes that differ: the organiser then
- * seals nothing, and the newcomer takes no box. Seventy-five bits, as a
- * pairing code has, so the server cannot search for a key of its own that
- * gives the same code.
+ * The join code: fifteen Crockford characters, 75 bits, that two screens show
+ * when someone joins. It is the digest of both member keys, the newcomer's and
+ * the confirming organiser's, so a server that swapped either one shows two
+ * codes that differ: the organiser then seals nothing, and the newcomer takes
+ * no box. Seventy-five bits, as a pairing code has, so the server cannot
+ * search for a key of its own that gives the same code.
  *
  * A QR code carries the code alone, so scanning it is as safe as reading it
  * out, and no safer.

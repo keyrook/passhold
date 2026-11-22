@@ -48,7 +48,9 @@ export function PasskeyApp({ token }: { token: string }) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  if (!view) return <div ref={ref} />;
+  // Drawn at the frame's foot: the frame sits in the page's bottom corner and
+  // grows or shrinks upward to the card, which stays put.
+  if (!view) return <div ref={ref} className="absolute bottom-2 left-0" />;
 
   const title =
     view.op === 'create'
@@ -81,7 +83,7 @@ export function PasskeyApp({ token }: { token: string }) {
   return (
     <div
       ref={ref}
-      className="flex w-[calc(100vw-6px)] flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white text-neutral-900 shadow-floating dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-50"
+      className="absolute bottom-2 left-0 flex w-[calc(100vw-6px)] flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white text-neutral-900 shadow-floating dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-50"
     >
       <div className="flex items-start gap-2 p-3">
         <PassholdMark size={24} />

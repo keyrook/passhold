@@ -70,15 +70,28 @@ export async function openCollectionName(collectionKey: CryptoKey, box: SealedBo
  * someone holding the key could write. Each generation has its own, and
  * whoever lets someone in writes it again.
  */
-export async function sealCollectionHolders(collectionKey: CryptoKey, holders: string[], place: CollectionPlace): Promise<SealedBox> {
-  return sealJson(collectionKey, { holders: [...new Set(holders)].sort() }, collectionHoldersAad(place.orgId, place.collectionId, place.generation));
+export async function sealCollectionHolders(collectionKey: CryptoKey, holders: string[], place: CollectionPlace, viewers?: string[]): Promise<SealedBox> {
+  const all = [...new Set(holders)].sort();
+  // In a generation with a write key, who may only view is written beside who holds it, and signed with it.
+  const only = viewers === undefined ? undefined : [...new Set(viewers)].sort();
+  if (only?.some((id) => !all.includes(id))) throw new Error('Only someone let into this vault can be set to view it.');
+  return sealJson(collectionKey, { holders: all, ...(only ? { viewers: only } : {}) }, collectionHoldersAad(place.orgId, place.collectionId, place.generation));
 }
 
 /** Opens who holds a collection. One from another collection or generation fails as a `DecryptionError`. */
 export async function openCollectionHolders(collectionKey: CryptoKey, box: SealedBox, place: CollectionPlace): Promise<string[]> {
-  const opened = await openJson<{ holders?: unknown }>(collectionKey, box, collectionHoldersAad(place.orgId, place.collectionId, place.generation));
-  if (!Array.isArray(opened?.holders) || opened.holders.some((holder) => typeof holder !== 'string')) throw new Error('Malformed collection holders.');
-  return opened.holders as string[];
+  return (await openCollectionMembers(collectionKey, box, place)).holders;
+}
+
+/** Who holds a collection, and of them who may only view: null where the list says nothing of it, as one of a generation with no write key. */
+export async function openCollectionMembers(collectionKey: CryptoKey, box: SealedBox, place: CollectionPlace): Promise<{ holders: string[]; viewers: string[] | null }> {
+  const opened = await openJson<{ holders?: unknown; viewers?: unknown }>(collectionKey, box, collectionHoldersAad(place.orgId, place.collectionId, place.generation));
+  const list = (value: unknown) => Array.isArray(value) && value.every((holder) => typeof holder === 'string');
+  if (!list(opened?.holders) || (opened.viewers !== undefined && !list(opened.viewers))) throw new Error('Malformed collection holders.');
+  const holders = opened.holders as string[];
+  const viewers = (opened.viewers as string[] | undefined) ?? null;
+  if (viewers?.some((id) => !holders.includes(id))) throw new Error('Malformed collection holders.');
+  return { holders, viewers };
 }
 
 /** Those the list under `collectionKey` names, or null when there is none that opens: then nobody can be told who stays. */

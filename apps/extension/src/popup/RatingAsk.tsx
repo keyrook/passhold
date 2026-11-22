@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../i18n/react.js';
+import { isFirefox } from '../lib/platform.js';
 import { send } from '../lib/messaging.js';
 import { onEdge } from '../lib/name.js';
 import { REVIEW_URLS } from '../lib/rating.js';
@@ -11,7 +12,12 @@ import { Button, Callout } from '../ui/primitives.js';
  * easy as "Rate it". "Rate it" is a plain link to the store's page in a new
  * tab, which needs no permission.
  */
+/** A rating is asked for where Passhold is listed: Firefox's listing has no address yet. */
 export function RatingAsk() {
+  return isFirefox() ? null : <Asking />;
+}
+
+function Asking() {
   const t = useT();
   const [ask, setAsk] = useState(false);
   useEffect(() => {

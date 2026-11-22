@@ -21,7 +21,7 @@ export const MASTER = 'correct horse battery staple';
  * `navigator.credentials` and hand back what the site would receive — the
  * credential in its JSON form, or the error's name.
  */
-const PASSKEY_SITE = `<script>
+export const PASSKEY_SITE = `<script>
   'use strict';
   const bytes = (text) => new TextEncoder().encode(text);
   const raw = (id) => Uint8Array.from(atob(id.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
@@ -116,6 +116,64 @@ export const SITES: Record<string, string> = {
       <button type="submit">Sign in</button>
     </form>`,
   'https://login.example.test/welcome': `<!doctype html><title>Welcome</title><h1>Welcome</h1>`,
+  // A sign-in that refuses the password and comes back to its form, as a server-drawn page does.
+  'https://login.example.test/again': `<!doctype html><title>Sign in</title>
+    <p>Wrong password</p>
+    <form action="/again" method="post">
+      <input id="email" name="email" type="email" autocomplete="username" placeholder="Email">
+      <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Password">
+      <button type="submit">Sign in</button>
+    </form>`,
+  // A sign-in drawn by script: it takes "right-password", puts the form away and says welcome, and keeps it for anything else.
+  'https://login.example.test/app': `<!doctype html><title>App</title>
+    <form id="form">
+      <input id="email" type="email" autocomplete="username" placeholder="Email">
+      <input id="password" type="password" autocomplete="current-password" placeholder="Password">
+      <button type="submit">Sign in</button>
+    </form><p id="said"></p><a id="forgot" href="/welcome">Forgot password?</a>
+    <script>
+      document.getElementById('form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        setTimeout(() => {
+          if (document.getElementById('password').value === 'right-password') {
+            document.getElementById('form').remove();
+            document.getElementById('said').textContent = 'Welcome';
+          } else document.getElementById('said').textContent = 'Wrong password';
+        }, 300);
+      });
+    </script>`,
+  // A password field with the page's own eye over its end, and a sign-in in a dialog opened with showModal().
+  'https://login.example.test/eye': `<!doctype html><title>Eye</title>
+    <form style="width: 320px">
+      <input id="email" type="email" autocomplete="username" placeholder="Email" style="width: 300px; height: 36px">
+      <span style="position: relative; display: inline-block">
+        <input id="password" type="password" autocomplete="current-password" placeholder="Password" style="width: 300px; height: 36px">
+        <button id="eye" type="button" style="position: absolute; right: 4px; top: 6px; width: 24px; height: 24px"
+          onclick="const field = document.getElementById('password'); field.type = field.type === 'password' ? 'text' : 'password'">👁</button>
+      </span>
+    </form>`,
+  'https://login.example.test/dialog': `<!doctype html><title>Dialog</title>
+    <button id="open" onclick="document.getElementById('box').showModal()">Sign in</button>
+    <dialog id="box"><form method="dialog" style="display: flex; flex-direction: column; gap: 8px; width: 280px">
+      <input id="email" type="email" autocomplete="username" placeholder="Email">
+      <input id="password" type="password" autocomplete="current-password" placeholder="Password">
+    </form></dialog>`,
+  // Email fields that are not a sign-in: a newsletter's, and a message to the site.
+  'https://login.example.test/news': `<!doctype html><title>News</title>
+    <form id="newsletter"><input id="news" type="email" name="email" placeholder="Your email"><button>Subscribe</button></form>
+    <form id="contact"><input id="name" placeholder="Name"><input id="mail" type="email" name="email" placeholder="Email"><textarea id="text"></textarea><button>Send</button></form>`,
+  // A sign-in in two steps: the email on one page, the password alone on the next.
+  'https://steps.example.test/': `<!doctype html><title>Sign in</title>
+    <form action="/password" method="post">
+      <input id="email" name="email" type="email" autocomplete="username" placeholder="Email">
+      <button type="submit">Next</button>
+    </form>`,
+  'https://steps.example.test/password': `<!doctype html><title>Password</title>
+    <form action="/home" method="post">
+      <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Password">
+      <button type="submit">Sign in</button>
+    </form>`,
+  'https://steps.example.test/home': `<!doctype html><title>Home</title><h1>Home</h1>`,
   // A sign-in page long enough to scroll, so the page can move the list from under a pointer.
   'https://login.example.test/tall': `<!doctype html><title>Sign in</title>
     <form><input id="email" type="email" autocomplete="username" placeholder="Email"><input id="password" type="password" autocomplete="current-password"></form>
@@ -199,14 +257,18 @@ export interface Extension {
   worker: Worker;
 }
 
-/** A browser with the test build loaded, in a throwaway profile: one device. */
-export async function launchBrowser(): Promise<{ context: BrowserContext; close: () => Promise<void> }> {
+/**
+ * A browser with the test build loaded, in a throwaway profile: one device.
+ * `extension` and `args`: another build, and what else Chromium is started
+ * with (e2e/store-build.spec.ts).
+ */
+export async function launchBrowser({ extension = EXTENSION_PATH, args = [] }: { extension?: string; args?: string[] } = {}): Promise<{ context: BrowserContext; close: () => Promise<void> }> {
   mkdirSync(PROFILE_ROOT, { recursive: true });
   const profile = mkdtempSync(join(PROFILE_ROOT, 'chrome-'));
   const context = await chromium.launchPersistentContext(profile, {
     channel: 'chromium',
     downloadsPath: DOWNLOADS,
-    args: [`--disable-extensions-except=${EXTENSION_PATH}`, `--load-extension=${EXTENSION_PATH}`],
+    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, ...args],
   });
   await serve(context);
   return {

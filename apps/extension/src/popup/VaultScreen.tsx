@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import { checkup, everyItem, placeOf, type LoginItem, type VaultData, type VaultPlace, type WalletItem, type WalletKind } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import { send, type AccountView, type PageInfo, type PendingView } from '../lib/messaging.js';
 import { useAction, useCopy } from '../ui/hooks.js';
-import { CheckIcon, CloudCheckIcon, CloudOffIcon, CopyIcon, FingerprintIcon, KeyIcon, LockIcon, RefreshIcon, SearchIcon, SettingsIcon, StarIcon, UserIcon, UsersIcon } from '../ui/icons.js';
+import { CheckIcon, CloudCheckIcon, CloudOffIcon, CopyIcon, FingerprintIcon, HistoryIcon, KeyIcon, LockIcon, RefreshIcon, SearchIcon, SettingsIcon, ShareIcon, StarIcon, UserIcon, UsersIcon } from '../ui/icons.js';
 import { FolderFilter, foldersOf, shownFolder, unfiledCount } from '../ui/Folders.js';
 import { AddMenu, KindChips, type AddKind, type Shown } from '../ui/Kinds.js';
 import { Button, Callout, cx } from '../ui/primitives.js';
@@ -13,7 +13,8 @@ import { StartOverWarning } from '../ui/StartOverWarning.js';
 import { SiteMark } from '../ui/SiteMark.js';
 import { pendingWords } from '../ui/pending.js';
 import { FamilyNotices } from '../ui/FamilyNotices.js';
-import { atPlace, PlaceContext, PlaceTabs, samePlace, sharedVaults, type SharedVault } from '../ui/place.js';
+import { atPlace, organiserAt, PlaceContext, PlaceTabs, samePlace, sharedVaults, viewOnlyAt, ViewOnlyContext, type SharedVault } from '../ui/place.js';
+import { FilesContext } from '../ui/Files.js';
 import { entriesOf, NONE_OF, walletLine, walletName } from '../ui/wallet.js';
 import { WalletMark } from '../ui/WalletMark.js';
 import { ProviderButtons } from '../options/ProviderSignIn.js';
@@ -54,6 +55,8 @@ export function VaultScreen({ data: vault, account }: { data: VaultData; account
   };
   return (
     <PlaceContext.Provider value={place}>
+      <ViewOnlyContext.Provider value={viewOnlyAt(vault, place)}>
+      <FilesContext.Provider value={{ linked: account !== null, organiser: organiserAt(vault, place), settings: false }}>
       <PlaceScreen
         key={place ? `${place.orgId}:${place.vaultId}` : 'mine'}
         vault={vault}
@@ -64,6 +67,8 @@ export function VaultScreen({ data: vault, account }: { data: VaultData; account
         opening={opening}
         onPlace={go}
       />
+      </FilesContext.Provider>
+      </ViewOnlyContext.Provider>
     </PlaceContext.Provider>
   );
 }
@@ -88,6 +93,7 @@ function PlaceScreen({
 }) {
   const linked = account !== null;
   const t = useT();
+  const viewOnly = useContext(ViewOnlyContext);
   const [view, setView] = useState<View>(opening ? { name: 'item', id: opening } : { name: 'list' });
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState<Shown>('all');
@@ -127,6 +133,7 @@ function PlaceScreen({
         <ItemScreen
           item={item}
           data={data}
+          linked={linked}
           shared={place ? [] : shared}
           onBack={() => setView({ name: 'list' })}
           onEdit={() => setView({ name: 'edit', id: item.id })}
@@ -198,7 +205,12 @@ function PlaceScreen({
       <header className="flex items-center justify-between gap-2 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
         <Brand>{t('vault.count', { count: live })}</Brand>
         <div className="flex items-center gap-0.5">
-          <AddMenu onAdd={add} />
+          {!viewOnly && <AddMenu onAdd={add} />}
+          {linked && (
+            <Button size="sm" variant="ghost" aria-label={t('send.title')} title={t('send.title')} onClick={() => void chrome.tabs.create({ url: chrome.runtime.getURL('options.html#send') })}>
+              <ShareIcon className="h-[18px] w-[18px]" />
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -251,6 +263,12 @@ function PlaceScreen({
         {error && (
           <div className="px-2 pb-2">
             <Callout tone="danger">{error}</Callout>
+          </div>
+        )}
+
+        {viewOnly && !query && (
+          <div className="mx-2 mb-2" data-testid="view-only">
+            <Callout tone="info">{t('family.viewOnly')}</Callout>
           </div>
         )}
 
@@ -313,6 +331,12 @@ function PlaceScreen({
           <section className="mx-2 mb-2 flex flex-col gap-2 rounded-xl bg-brand-50 p-3 dark:bg-brand-500/10" data-testid="pending">
             <p className="text-[13px] font-semibold">{pendingSays.title}</p>
             <p className="text-[13px] text-neutral-700 dark:text-neutral-300">{pendingSays.body}</p>
+            {pendingSays.note && (
+              <p className="flex items-start gap-1.5 text-[12.5px] leading-snug text-neutral-700 dark:text-neutral-300">
+                <HistoryIcon className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>{pendingSays.note}</span>
+              </p>
+            )}
             <div className="flex flex-wrap gap-1.5">
               <Button size="sm" variant="primary" onClick={() => answer('save')}>
                 {pendingSays.save}
@@ -471,6 +495,7 @@ function WalletRow({
   onOpen: () => void;
 }) {
   const t = useT();
+  const copyKey = t('wallet.copyField', { field: t('apikey.key').toLocaleLowerCase(t.locale) });
   return (
     <li className="group flex items-center gap-1 rounded-xl hover:bg-neutral-100 dark:hover:bg-neutral-900">
       <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-start">
@@ -487,6 +512,13 @@ function WalletRow({
         <div className="flex items-center gap-0.5 pe-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
           <Button size="sm" variant="ghost" aria-label={t('card.copyNumber')} title={t('card.copyNumber')} onClick={() => void onCopy(`${item.id}:n`, item.number)}>
             {copied === `${item.id}:n` ? <CheckIcon className="h-4 w-4 text-green-700 dark:text-green-300" /> : <CopyIcon className="h-4 w-4" />}
+          </Button>
+        </div>
+      )}
+      {item.kind === 'apikey' && item.key && (
+        <div className="flex items-center gap-0.5 pe-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+          <Button size="sm" variant="ghost" aria-label={copyKey} title={copyKey} onClick={() => void onCopy(`${item.id}:k`, item.key)}>
+            {copied === `${item.id}:k` ? <CheckIcon className="h-4 w-4 text-green-700 dark:text-green-300" /> : <CopyIcon className="h-4 w-4" />}
           </Button>
         </div>
       )}

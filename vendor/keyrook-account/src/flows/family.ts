@@ -1,10 +1,11 @@
 /**
- * A family, as one product's device runs it: its member key opened with the product's own key, the roster checked
- * against what the device pinned, the family's key and each collection's
- * taken only from someone pinned, and the product's records sealed, opened,
- * pulled and pushed under them. The page makes and changes the family
- * (`console.ts`); a product reads and writes what it shares, and an
- * organiser's gives everyone new keys after someone went (`rotateFamilyKeys`).
+ * A family, as one product's device runs it: its member key opened with the
+ * product's own key, the roster checked against what the device pinned, the
+ * family's key and each collection's taken only from someone pinned, and the
+ * product's records sealed, opened, pulled and pushed under them. The page
+ * makes and changes the family (`console.ts`); a product reads and writes what
+ * it shares, and an organiser's gives everyone new keys after someone went
+ * (`rotateFamilyKeys`).
  *
  * The server can seal to any public key, but cannot make an authenticated
  * box from a member key it does not hold. So the family's key is taken only
@@ -18,17 +19,24 @@
  * replaced: it is taken for nothing new.
  */
 import { DecryptionError, type SealedBox } from '../crypto/aead.js';
+import {
+  checkOrgRecord,
+  newWriteKey,
+  openCollectionGeneration,
+  openCollectionMembersOf,
+  sealCollectionGeneration,
+  sealCollectionMembers,
+  signOrgRecord,
+  type HeldGeneration,
+  type WriteKey,
+} from '../keys/org/access.js';
 import { newOrgKey, openOrgKey, sealOrgKey, type AuthBox } from '../keys/org/authbox.js';
 import {
   newCollectionKey,
-  openCollectionKey,
   openCollectionName,
   openOrgRecord,
   openOrgTombstone,
-  sealCollectionHolders,
-  sealCollectionKey,
   sealCollectionName,
-  sealedHoldersOf,
   sealOrgRecord,
   sealOrgTombstone,
 } from '../keys/org/collection.js';
@@ -65,6 +73,14 @@ export interface FamilyCollection {
   generation: number;
   /** By generation: the one in use, and older ones, to read what is not sealed again yet. */
   keys: Map<number, CryptoKey>;
+  /**
+   * By generation, where view only is on: the write key each record of it is
+   * signed with. A record of such a generation opens only with a signature
+   * that checks out.
+   */
+  writeKeys: Map<number, WriteKey>;
+  /** Whether this person may write here: always without view only, and with it, only holding the write key's private half. */
+  canEdit: boolean;
 }
 
 /** Someone whose key is not the one this device pinned for them: compared on two screens before anything of theirs is taken. */
@@ -253,21 +269,40 @@ export async function openFamily(
     return collectionSenderKey(next, keyBox.senderId, keyBox.collectionId, keyBox.generation);
   };
 
+  // A write key is taken only from an organiser, or from the person's own hand: never from a viewer's.
+  const organisers = roster.body.members.filter((line) => line.role === 'owner').map((line) => line.accountId);
   const collections: FamilyCollection[] = [];
   for (const collection of detail.collections) {
     if (collection.product !== product) continue;
     const keys = new Map<number, CryptoKey>();
+    const writeKeys = new Map<number, WriteKey>();
     for (const keyBox of detail.me.collectionKeyBoxes) {
       if (keyBox.collectionId !== collection.id || keyBox.generation > collection.generation || keys.has(keyBox.generation)) continue;
       const from = senderOf(keyBox);
       if (!from) continue;
       const place = { orgId, collectionId: collection.id, generation: keyBox.generation };
-      keys.set(keyBox.generation, await openCollectionKey(boxFrom<AuthBox>(keyBox.box), { recipient: member, recipientId: accountId, senderKey: from, senderId: keyBox.senderId }, place));
+      const trusted = keyBox.senderId === accountId || organisers.includes(keyBox.senderId);
+      const held = await openCollectionGeneration(boxFrom<AuthBox>(keyBox.box), { recipient: member, recipientId: accountId, senderKey: from, senderId: keyBox.senderId }, place, trusted);
+      if (!held) {
+        // An access box from someone no longer an organiser is set aside, not the whole family with it.
+        if (!trusted) continue;
+        throw new DecryptionError();
+      }
+      keys.set(keyBox.generation, held.key);
+      if (held.write) writeKeys.set(keyBox.generation, held.write);
     }
     const key = keys.get(collection.generation);
     if (!key) continue;
     const place = { orgId, collectionId: collection.id, generation: collection.generation };
-    collections.push({ id: collection.id, name: await openCollectionName(key, boxFrom(collection.nameBox), place), generation: collection.generation, keys });
+    const write = writeKeys.get(collection.generation);
+    collections.push({
+      id: collection.id,
+      name: await openCollectionName(key, boxFrom(collection.nameBox), place),
+      generation: collection.generation,
+      keys,
+      writeKeys,
+      canEdit: !write || write.sign !== null,
+    });
   }
   return {
     status: 'open',
@@ -323,12 +358,13 @@ export type FamilyRotation =
   | { status: 'stale' };
 
 /**
- * After someone went, as an organiser's app syncs, what the page's `consoleRotateFamily` does, from the
- * member key this app holds: the next family key to everyone left, from the
- * roster's keys; the roster without whoever went; and the next key of each
- * of this app's marked collections the person holds, to those still in it,
- * its name sealed again under it. Another app's collection stays marked for
- * that app, or the page; so does one the person does not hold.
+ * After someone went, as an organiser's app syncs, what the page's
+ * `consoleRotateFamily` does, from the member key this app holds: the next
+ * family key to everyone left, from the roster's keys; the roster without
+ * whoever went; and the next key of each of this app's marked collections the
+ * person holds, to those still in it, its name sealed again under it. Another
+ * app's collection stays marked for that app, or the page; so does one the
+ * person does not hold.
  *
  * Once the family's key has changed, a collection still marked, one no
  * organiser held, say, gets its next key from the app of anyone holding it,
@@ -354,8 +390,12 @@ export async function rotateFamilyKeys(api: HttpSyncAdapter, family: ProductFami
   for (const collection of detail.collections) {
     const held = family.collections.find((entry) => entry.id === collection.id && entry.generation === collection.generation);
     if (!collection.rotationDue || !held) continue;
-    const holders = (await sealedHoldersOf(held.keys.get(held.generation)!, orgId, collection))?.filter((id) => confirmed.includes(id)) ?? [];
-    if (holders.length > 0) marked.push({ collection, name: held.name, holders });
+    const write = held.writeKeys.get(held.generation) ?? null;
+    // A view only collection's next write key comes from an organiser alone: nobody else's would be taken.
+    if (write && !organiser) continue;
+    const members = await openCollectionMembersOf({ key: held.keys.get(held.generation)!, write }, orgId, collection);
+    const holders = members?.holders.filter((id) => confirmed.includes(id)) ?? [];
+    if (holders.length > 0) marked.push({ collection, name: held.name, holders, viewers: write ? members!.viewers.filter((id) => holders.includes(id)) : null });
   }
   if (!detail.org.rotationDue && marked.length === 0) return { status: 'not-due' };
 
@@ -370,13 +410,21 @@ export async function rotateFamilyKeys(api: HttpSyncAdapter, family: ProductFami
   const to = (recipientId: string) => ({ sender: member, senderId: accountId, recipientKey: listedKey(roster, recipientId)!, recipientId });
 
   const collections = [];
-  for (const { collection, name, holders } of marked) {
+  for (const { collection, name, holders, viewers } of marked) {
     const place = { orgId, collectionId: collection.id, generation: collection.generation + 1 };
-    const key = await newCollectionKey();
+    // Where view only is on, the next generation gets its own write key, its private half only to those who may edit.
+    const next: HeldGeneration = { key: await newCollectionKey(), write: viewers ? await newWriteKey() : null };
     const keyBoxes = [];
-    for (const holder of holders) keyBoxes.push({ accountId: holder, box: wire(await sealCollectionKey(key, to(holder), place)) });
-    const nameBox = wire(await sealCollectionName(key, name, place));
-    collections.push({ collectionId: collection.id, generation: place.generation, nameBox, holdersBox: wire(await sealCollectionHolders(key, holders, place)), keyBoxes });
+    for (const holder of holders) keyBoxes.push({ accountId: holder, box: wire(await sealCollectionGeneration(next, to(holder), place, !viewers?.includes(holder))) });
+    const nameBox = wire(await sealCollectionName(next.key, name, place));
+    collections.push({
+      collectionId: collection.id,
+      generation: place.generation,
+      nameBox,
+      holdersBox: wire(await sealCollectionMembers(next, holders, place, viewers ?? [])),
+      keyBoxes,
+      ...(viewers ? { viewers } : {}),
+    });
   }
   try {
     if (detail.org.rotationDue) {
@@ -433,6 +481,9 @@ export async function sealFamilyRecord<T>(
   const key = collection?.keys.get(collection.generation);
   if (!collection || !key) throw new Error('That is not a collection of yours in this family.');
   const place = { orgId: family.orgId, collectionId: collection.id, generation: collection.generation, id: record.id, rev: record.rev };
+  const write = collection.writeKeys.get(collection.generation);
+  if (write && !write.sign) throw new Error('You can view this vault, not change it.');
+  const sealed = record.value === null ? await sealOrgTombstone(key, place) : await sealOrgRecord(key, record.value, place);
   return {
     id: record.id,
     kind: record.kind,
@@ -444,7 +495,7 @@ export async function sealFamilyRecord<T>(
     updatedAt: record.updatedAt ?? Date.now(),
     // The server names the device the session is for.
     deviceId: record.deviceId ?? '',
-    box: record.value === null ? await sealOrgTombstone(key, place) : await sealOrgRecord(key, record.value, place),
+    box: write ? await signOrgRecord(write, sealed, place, record.value === null) : sealed,
   };
 }
 
@@ -473,6 +524,9 @@ export async function openFamilyRecord<T>(family: ProductFamily, record: OrgReco
   };
   if (!record.box) throw new Error('Malformed family record.');
   const place = { orgId: family.orgId, collectionId: collection.id, generation: record.generation, id: record.id, rev: record.rev };
+  // Where view only is on, only what someone who may edit signed: a viewer's write, let through, is set aside here.
+  const write = collection.writeKeys.get(record.generation);
+  if (write) await checkOrgRecord(write, record.box, place, record.deleted);
   if (record.deleted) {
     await openOrgTombstone(key, record.box, place);
     return { ...meta, value: null };
@@ -531,8 +585,8 @@ export async function pushFamily<T>(
   api: HttpSyncAdapter,
   family: ProductFamily,
   records: OrgRecord[],
-): Promise<{ accepted: OrgPushResponse['accepted']; conflicts: FamilyRecord<T>[]; unreadable: OrgRecord[]; serverRev: number }> {
+): Promise<{ accepted: OrgPushResponse['accepted']; conflicts: FamilyRecord<T>[]; unreadable: OrgRecord[]; rejectedForLimit: string[]; serverRev: number }> {
   const pushed = await api.orgPush(family.orgId, records);
   const { records: conflicts, unreadable } = await openEach<T>(family, pushed.conflicts);
-  return { accepted: pushed.accepted, conflicts, unreadable, serverRev: pushed.serverRev };
+  return { accepted: pushed.accepted, conflicts, unreadable, rejectedForLimit: (pushed.rejectedForLimit ?? []).map(({ id }) => id), serverRev: pushed.serverRev };
 }

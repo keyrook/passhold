@@ -7,10 +7,28 @@
 import { PassholdError } from '../errors.js';
 import { newId } from '../util/id.js';
 import { cleanFields, cleanFolder, fieldWords, settleFolder } from './folders.js';
-import { LIMITS, type AddressDraft, type AddressItem, type CardDraft, type CardItem, type CustomField, type Items, type NoteItem, type VaultData, type WalletDraft, type WalletItem } from './model.js';
+import type { EditOptions } from './items.js';
+import { afterEdit, cleanVersions, type ItemVersion } from './versions.js';
+import { readAttachments } from './attachments.js';
+import { afterReplacing, cleanHistory, replacedHidden } from './history.js';
+import { API_KEY_LIMITS, cleanDay, cleanEnvName, cleanHosts, cleanSendAs, serviceName } from '../apikey.js';
+import { CATALOG } from '../brand/catalog.js';
+import { LIMITS, type AddressDraft, type AddressItem, type ApiKeyItem, type CardDraft, type CardItem, type CustomField, type Items, type NoteItem, type PasswordChange, type SshKeyItem, type VaultData, type WalletDraft, type WalletItem } from './model.js';
 
 /** Bounds on one field: far above anything printed on a card or an envelope, below what would slow every seal. */
-export const WALLET_LIMITS = { line: 200, street: 1_000, postalCode: 20, phone: 40, email: 320, number: 19, code: 4, text: LIMITS.notes } as const;
+export const WALLET_LIMITS = {
+  line: 200,
+  street: 1_000,
+  postalCode: 20,
+  phone: 40,
+  email: 320,
+  number: 19,
+  code: 4,
+  text: LIMITS.notes,
+  /** A 16,384-bit RSA key, the largest OpenSSH makes, is under 13,000 characters as a file. */
+  sshPrivateKey: 20_000,
+  sshPublicKey: 6_000,
+} as const;
 
 // --- reading: everything from storage, a backup or the account is checked -----
 
@@ -45,7 +63,10 @@ function year(value: unknown): number | null {
 const country = (value: unknown): string => (typeof value === 'string' && /^[A-Za-z]{2}$/.test(value.trim()) ? value.trim().toUpperCase() : '');
 
 /** What an item holds, kind by kind: everything but its name, its folder and fields, and what the vault keeps itself. */
-type Content<T extends WalletItem> = T extends WalletItem ? Omit<T, 'id' | 'title' | 'favorite' | 'createdAt' | 'updatedAt' | 'lastUsedAt' | 'deletedAt' | 'folder' | 'fields'> : never;
+type Content<T extends WalletItem> = T extends WalletItem ? Omit<T, 'id' | 'title' | 'favorite' | 'createdAt' | 'updatedAt' | 'lastUsedAt' | 'deletedAt' | 'folder' | 'fields' | 'versions' | 'history'> : never;
+
+/** Slugs the brand catalogue knows: a service is one of them, or none. */
+const SLUGS = new Set(CATALOG.map((brand) => brand.slug));
 
 function contentOf(raw: Record<string, unknown>): Content<WalletItem> | null {
   switch (raw.kind) {
@@ -75,6 +96,31 @@ function contentOf(raw: Record<string, unknown>): Content<WalletItem> | null {
       } satisfies Content<AddressItem>;
     case 'note':
       return { kind: 'note', text: text(raw.text, WALLET_LIMITS.text) } satisfies Content<NoteItem>;
+    case 'ssh':
+      return {
+        kind: 'ssh',
+        // The file as it was written, line ends and all: OpenSSH reads it back only that way.
+        privateKey: text(raw.privateKey, WALLET_LIMITS.sshPrivateKey),
+        publicKey: line(raw.publicKey, WALLET_LIMITS.sshPublicKey),
+        fingerprint: line(raw.fingerprint),
+        notes: text(raw.notes, LIMITS.notes),
+      } satisfies Content<SshKeyItem>;
+    case 'apikey':
+      return {
+        kind: 'apikey',
+        service: typeof raw.service === 'string' && SLUGS.has(raw.service) ? raw.service : '',
+        // As it was pasted, but for the space around it: a key is one line, and a stray space is no part of it.
+        key: text(raw.key, API_KEY_LIMITS.key * 2).trim().slice(0, API_KEY_LIMITS.key),
+        keyId: line(raw.keyId, API_KEY_LIMITS.keyId),
+        hosts: cleanHosts(raw.hosts),
+        sendAs: cleanSendAs(raw.sendAs),
+        env: cleanEnvName(raw.env),
+        environment: line(raw.environment),
+        scopes: line(raw.scopes, API_KEY_LIMITS.scopes),
+        issuedAt: cleanDay(raw.issuedAt),
+        expiresAt: cleanDay(raw.expiresAt),
+        notes: text(raw.notes, LIMITS.notes),
+      } satisfies Content<ApiKeyItem>;
     default:
       return null;
   }
@@ -99,7 +145,32 @@ export function cleanWalletItem(value: unknown): WalletItem | null {
     deletedAt: time(raw.deletedAt),
     folder: cleanFolder(raw.folder),
     fields: cleanFields(raw.fields),
+    ...versionsOf(raw.versions),
+    ...readAttachments(raw),
+    // Kept by the vault, never given by an edit: read only with the item it belongs to.
+    ...(content.kind === 'apikey' ? { history: cleanHistory(raw.history, API_KEY_LIMITS.key) } : {}),
   } as WalletItem;
+}
+
+/** What a card, an address or a note holds that an edit gives it: the draft a version keeps. */
+export function walletDraftOf(item: WalletItem): WalletDraft {
+  // Nor its files: a version restored never brings back one taken off, nor takes one away.
+  const { id: _, favorite: __, createdAt: ___, updatedAt: ____, lastUsedAt: _____, deletedAt: ______, versions: _______, attachments: ________, detached: _________, ...draft } = item;
+  // Nor an API key's history: a version is what an edit gives, and no edit gives that.
+  if (draft.kind === 'apikey') {
+    const { history: __________, ...rest } = draft as typeof draft & { history?: unknown };
+    return rest as WalletDraft;
+  }
+  return draft as WalletDraft;
+}
+
+/** As a login's (items.ts): each version read as an item of its kind, a version's own never. */
+function versionsOf(value: unknown): { versions?: ItemVersion<WalletDraft>[] } {
+  const versions = cleanVersions(value, (raw) => {
+    const item = cleanWalletItem({ ...raw, id: 'version', versions: undefined });
+    return item && walletDraftOf(item);
+  });
+  return versions ? { versions } : {};
 }
 
 /** The wallet as stored: each item checked, an id seen before — a login's included — dropped. */
@@ -117,7 +188,7 @@ export function cleanWallet(value: unknown, seen: Set<string>): WalletItem[] {
 
 // --- writing ------------------------------------------------------------------
 
-/** Whether there is anything to keep: a card needs its number or a name, an address any part of one, a note any words — or any of them, fields of its own. */
+/** Whether there is anything to keep: a card needs its number or a name, an address any part of one, a note any words, an SSH key the key or a name — or any of them, fields of its own. */
 function worthKeeping(title: string, content: Content<WalletItem>, fields: readonly CustomField[]): boolean {
   if (fields.length) return true;
   switch (content.kind) {
@@ -127,6 +198,11 @@ function worthKeeping(title: string, content: Content<WalletItem>, fields: reado
       return Boolean(title || content.name || content.organization || content.street || content.city || content.phone || content.email);
     case 'note':
       return Boolean(title || content.text.trim());
+    case 'ssh':
+      return Boolean(title || content.privateKey.trim() || content.publicKey);
+    case 'apikey':
+      // A name alone is no key: one is kept for the key it holds.
+      return Boolean(content.key);
   }
 }
 
@@ -179,16 +255,17 @@ export function addWalletItem<T extends Items>(data: T, draft: WalletDraft, now 
     deletedAt: null,
     folder: settleFolder(data, folder ?? ''),
     fields: fields ?? [],
+    ...(content.kind === 'apikey' ? { history: [] } : {}),
   } as WalletItem;
   return { data: { ...data, wallet: [...data.wallet, item] }, item };
 }
 
 /** Apply an edit. A card stays a card: an edit of another kind is refused, never turned into one. */
-export function updateWalletItem<T extends Items>(data: T, id: string, draft: WalletDraft, now = Date.now()): T {
+export function updateWalletItem<T extends Items>(data: T, id: string, draft: WalletDraft, now = Date.now(), options: EditOptions = {}): T {
   const item = find(data, id);
   const { title, content, folder, fields } = cleanDraft(draft);
   if (content.kind !== item.kind) throw new PassholdError('itemInvalid');
-  return replace(data, {
+  const next = {
     ...item,
     title,
     ...content,
@@ -196,7 +273,23 @@ export function updateWalletItem<T extends Items>(data: T, id: string, draft: Wa
     folder: folder === undefined ? item.folder : settleFolder(data, folder, item.id),
     fields: fields ?? item.fields,
     updatedAt: now,
-  } as WalletItem);
+    ...(item.kind === 'apikey' && content.kind === 'apikey' ? { history: afterReplacing(item.history, replacedKeys(item, content.key, fields, now)) } : {}),
+  } as WalletItem;
+  const versions = afterEdit(item.versions, walletDraftOf(item), walletDraftOf(next), now, options.versions === true);
+  return replace(data, versions ? { ...next, versions } : next);
+}
+
+/** What an edit of an API key replaces: the key it held, and its hidden fields' values, as a login's password and fields are kept. */
+function replacedKeys(item: ApiKeyItem, key: string, fields: readonly CustomField[] | undefined, now: number): PasswordChange[] {
+  return [...(item.key && key !== item.key ? [{ password: item.key, changedAt: now }] : []), ...replacedHidden(item.fields, fields, now)];
+}
+
+/** As a login's (items.ts, restoreLoginVersion): an edit like any other, so what it is now becomes a version in turn. */
+export function restoreWalletVersion<T extends Items>(data: T, id: string, savedAt: number, now = Date.now(), options: EditOptions = {}): T {
+  const item = find(data, id);
+  const version = item.versions?.find((entry) => entry.savedAt === savedAt);
+  if (!version) throw new PassholdError('itemNotFound');
+  return updateWalletItem(data, id, { ...version.draft, favorite: item.favorite }, now, options);
 }
 
 export function setWalletFavorite<T extends Items>(data: T, id: string, favorite: boolean): T {
@@ -250,7 +343,19 @@ function searchable(item: WalletItem): string[] {
       return [item.title, item.name, item.organization, item.street, item.city, item.region, item.postalCode, item.country, item.phone, item.email, item.notes];
     case 'note':
       return [item.title, item.text];
+    case 'ssh':
+      // Its kind and its comment, and the fingerprint a server's log shows; never the key.
+      return [item.title, ...sshWords(item.publicKey), item.fingerprint, item.notes];
+    case 'apikey':
+      // Where it goes and what it is for, and its id, which is no secret; never the key.
+      return [item.title, item.service, serviceName(item.service), item.keyId, ...item.hosts, item.env, item.environment, item.scopes, item.notes];
   }
+}
+
+/** Of a public key line, what a person reads: its kind and its comment, not the key between them. */
+function sshWords(publicKey: string): string[] {
+  const [type = '', , ...comment] = publicKey.split(' ');
+  return [type, comment.join(' ')];
 }
 
 /** Live items of one kind, the most recently used first: what the list under a field offers. */
@@ -258,6 +363,18 @@ export function walletOf<K extends WalletItem['kind']>(data: VaultData, kind: K)
   return data.wallet
     .filter((item): item is Extract<WalletItem, { kind: K }> => item.kind === kind && item.deletedAt === null)
     .sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) || walletTitle(a).localeCompare(walletTitle(b)));
+}
+
+/**
+ * The item a field of a checkout may be filled with: a live card for a card's
+ * field, a live address for an address's — and nothing else, whatever id a
+ * page names. A note, an SSH key or an API key is filled nowhere: an API key
+ * goes to its service from a command, never into a web page.
+ */
+export function fillableWalletItem(data: Items, id: string, field: 'card' | 'address'): CardItem | AddressItem | null {
+  const item = data.wallet.find((entry) => entry.id === id && entry.deletedAt === null);
+  if (!item || item.kind !== field) return null;
+  return item.kind === 'card' || item.kind === 'address' ? item : null;
 }
 
 /**
@@ -277,6 +394,11 @@ export function walletTitle(item: WalletItem): string {
       return item.name || item.organization || item.street.split('\n')[0] || '';
     case 'note':
       return '';
+    case 'ssh':
+      return sshWords(item.publicKey)[1] ?? '';
+    case 'apikey':
+      // Its service and environment, as two keys of one service are told apart: "Stripe · production".
+      return [serviceName(item.service), item.environment].filter(Boolean).join(' · ');
   }
 }
 

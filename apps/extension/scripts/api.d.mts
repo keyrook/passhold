@@ -4,3 +4,7 @@ export function checkApi(url: string): string;
 export function accountRpFor(url: string): string;
 export function accountPageFor(url: string): string;
 export function checkStoreUpload(files: [name: string, bytes: Buffer][]): void;
+export const FILES_STORE: string;
+export function filesStoreFor(url: string): string | null;
+export function sendPageFor(url: string): string;
+export function vaultPageFor(url: string): string;

@@ -9,6 +9,11 @@ import type { SealedBox } from '../crypto/aead.js';
 import type { AccountKdfParams } from './account.js';
 import type { PullResult, PushResult, RemoteRecord, SyncAdapter } from './adapter.js';
 import type {
+  AppleCheckout,
+  BillingLink,
+  BillingView,
+  CheckoutRequest,
+  ManageBillingRequest,
   FamilyRecoveryAskRequest,
   FamilyRecoveryAskResponse,
   FamilyRecoveryStepRequired,
@@ -22,6 +27,11 @@ import type {
   OrgRecoveryOnRequest,
   SignInProvider,
   AccountExport,
+  BeginFileRequest,
+  BeginFileResponse,
+  FileAddress,
+  FilesResponse,
+  FileView,
   ActivityResponse,
   SecurityEvent,
   EmailChangeBeginRequest,
@@ -115,8 +125,6 @@ import type {
   VerifyOrgMemberRequest,
   CreateOrgRequest,
   OrgDetail,
-  OrgEmergencyBox,
-  OrgEmergencyRequest,
   OrgInvite,
   OrgInviteRequest,
   OrgProductBoxRequest,
@@ -128,10 +136,29 @@ import type {
   OrgRoster,
   OrgsResponse,
   RotateOrgRequest,
+  BreachRangesRequest,
+  LinkBoxesRequest,
+  LinkState,
+  SendCreated,
+  SendOpened,
+  SendOpenRequest,
+  SendReportRequest,
+  SendRequest,
+  SendView,
+  BreachRangesResponse,
+  BreachWatchRequest,
+  BreachWatchState,
+  CollectionEditorRequest,
   CollectionKeysRequest,
   CreateCollectionRequest,
   RenameCollectionRequest,
   RotateCollectionRequest,
+  EmergencyChangeRequest,
+  EmergencyKeyRequest,
+  EmergencyNameRequest,
+  EmergencyPullResponse,
+  EmergencyState,
+  OrgBox,
 } from './protocol.js';
 
 const collectionPath = (orgId: string, collectionId: string) => `/orgs/${encodeURIComponent(orgId)}/collections/${encodeURIComponent(collectionId)}`;
@@ -238,6 +265,16 @@ export async function prelogin(
     fetcher,
   );
   return kdf;
+}
+
+/** Opens a Send by its access token: no session, as anyone with the link opens it. Counts one open. */
+export async function openSendRemote(baseUrl: string, id: string, access: string, fetcher: Fetcher = fetch): Promise<SendOpened> {
+  return request<SendOpened>(baseUrl, `/sends/${encodeURIComponent(id)}/open`, { method: 'POST', body: JSON.stringify({ access } satisfies SendOpenRequest) }, fetcher);
+}
+
+/** Reports a Send, which stops it at once: only with its access token, so only someone with the link. */
+export async function reportSendRemote(baseUrl: string, id: string, input: SendReportRequest, fetcher: Fetcher = fetch): Promise<void> {
+  await request<unknown>(baseUrl, `/sends/${encodeURIComponent(id)}/report`, { method: 'POST', body: JSON.stringify(input) }, fetcher);
 }
 
 /**
@@ -395,8 +432,7 @@ export function startOver(baseUrl: string, body: StartOverRequest, fetcher: Fetc
 
 /**
  * A code to the address, to ask a family's organiser for help back in.
- * Resolves the same way whether or not an organiser
- * holds the account's root.
+ * Resolves the same way whether or not an organiser holds the account's root.
  */
 export async function requestFamilyRecoveryCode(baseUrl: string, email: string, fetcher: Fetcher = fetch): Promise<void> {
   await request<{ sent: true }>(
@@ -498,24 +534,27 @@ export interface SignInOptions {
    * way to sign in with a provider.
    */
   byApp: boolean;
-  /** It signs in with passkeys. A server from before says nothing, which is read as no. */
+  /** It signs in with passkeys. An older server says nothing, which is read as no. */
   passkeys: boolean;
-  /** An account may turn on a second step at sign-in. */
+  /** An account may turn on a second step at sign-in; a server may not offer it yet. */
   secondStep: boolean;
-  /** Families are offered. */
+  /** Families are offered; a server may keep them off. */
   families: boolean;
   /** A family's plan may hold recovery by an organiser, so a member may ask theirs for help back in. */
   familyRecovery: boolean;
+  /** Plans are sold, so a page or an app may say what a paid one holds. */
+  billing: boolean;
 }
 
 export async function signInOptions(baseUrl: string, fetcher: Fetcher = fetch): Promise<SignInOptions> {
-  const { providers, returnBy, passkeys, secondStep, families, familyRecovery } = await request<{
+  const { providers, returnBy, passkeys, secondStep, families, familyRecovery, billing } = await request<{
     providers: string[];
     returnBy?: string[];
     passkeys?: boolean;
     secondStep?: boolean;
     families?: boolean;
     familyRecovery?: boolean;
+    billing?: boolean;
   }>(
     baseUrl,
     '/providers',
@@ -530,6 +569,7 @@ export async function signInOptions(baseUrl: string, fetcher: Fetcher = fetch): 
     secondStep: secondStep === true,
     families: families === true,
     familyRecovery: familyRecovery === true,
+    billing: billing === true,
   };
 }
 
@@ -689,8 +729,57 @@ export class HttpSyncAdapter implements SyncAdapter {
   }
 
   /** What the server holds about the account, as the page lets the person download it. */
+  /** Asks for room for a sealed file, and where to put it. */
+  async beginFile(body: BeginFileRequest): Promise<BeginFileResponse> {
+    return this.authed<BeginFileResponse>('/files', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  /** Says the file has been put; the server asks the store. */
+  async finishFile(id: string): Promise<FileView> {
+    return this.authed<FileView>(`/files/${encodeURIComponent(id)}/done`, { method: 'POST', body: '{}' });
+  }
+
+  /** Where to read a file, for the next few minutes. */
+  async fileAddress(id: string): Promise<FileAddress> {
+    return this.authed<FileAddress>(`/files/${encodeURIComponent(id)}`, { method: 'GET' });
+  }
+
+  /** This product's files, the account's or with `orgId` a family's, and the room there is. */
+  async files(orgId?: string): Promise<FilesResponse> {
+    return this.authed<FilesResponse>(orgId ? `/files?org=${encodeURIComponent(orgId)}` : '/files', { method: 'GET' });
+  }
+
+  async deleteFile(id: string): Promise<void> {
+    await this.authed<unknown>(`/files/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
   async exportAccount(): Promise<AccountExport> {
     return this.authed<AccountExport>('/account/export', { method: 'GET' });
+  }
+
+  /** The person's plans, and what they pay for. Any product may read it. */
+  async billing(): Promise<BillingView> {
+    return this.authed<BillingView>('/account/billing', { method: 'GET' });
+  }
+
+  /** Where to pay for a plan, from the account page alone: Paddle's checkout, on the payment page. */
+  async checkout(body: CheckoutRequest): Promise<string> {
+    return (await this.authed<BillingLink>('/account/billing/checkout', { method: 'POST', body: JSON.stringify(body) })).url;
+  }
+
+  /**
+   * What an app buys a plan as through Apple's in-app purchase, and the token
+   * StoreKit is handed with it. From an app alone: the account page sells
+   * through Paddle.
+   */
+  async appleCheckout(body: CheckoutRequest): Promise<AppleCheckout> {
+    return this.authed<AppleCheckout>('/account/billing/apple', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  /** Paddle's own page for a plan the person pays for, from the account page alone: a link of a few minutes. */
+  async manageBilling(subscription: string): Promise<string> {
+    const body: ManageBillingRequest = { subscription };
+    return (await this.authed<BillingLink>('/account/billing/manage', { method: 'POST', body: JSON.stringify(body) })).url;
   }
 
   /** Gives the account a name, or clears it with null; answers the name as kept. */
@@ -898,7 +987,7 @@ export class HttpSyncAdapter implements SyncAdapter {
     await this.authed<void>(`/pairing/${encodeURIComponent(id)}/deny`, { method: 'POST', body: '{}' });
   }
 
-  // --- Families ----------------------------------------------
+  // --- Families ---------------------------------------------------------------
 
   async orgs(): Promise<OrgsResponse> {
     return this.authed<OrgsResponse>('/orgs', { method: 'GET' });
@@ -994,6 +1083,11 @@ export class HttpSyncAdapter implements SyncAdapter {
   }
 
   /** A new key for a collection; whoever held it and is given none is let out. */
+  /** An organiser lets someone who could only view edit a collection. */
+  async collectionEditor(orgId: string, collectionId: string, accountId: string, body: CollectionEditorRequest): Promise<OrgDetail> {
+    return this.authed<OrgDetail>(`${collectionPath(orgId, collectionId)}/editors/${encodeURIComponent(accountId)}`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+
   async rotateCollection(orgId: string, collectionId: string, body: RotateCollectionRequest): Promise<OrgDetail> {
     return this.authed<OrgDetail>(`${collectionPath(orgId, collectionId)}/rotate`, { method: 'POST', body: JSON.stringify(body) });
   }
@@ -1002,27 +1096,134 @@ export class HttpSyncAdapter implements SyncAdapter {
     await this.authed<void>(collectionPath(orgId, collectionId), { method: 'DELETE' });
   }
 
-  /** Names the caller's emergency contact, with their root sealed to them. */
-  async setOrgEmergency(orgId: string, body: OrgEmergencyRequest): Promise<OrgDetail> {
-    return this.authed<OrgDetail>(`/orgs/${encodeURIComponent(orgId)}/emergency`, { method: 'PUT', body: JSON.stringify(body) });
+  /** Every suffix Pwned Passwords knows under each prefix of a password's SHA-1, padded: the passwords never leave the device. */
+  async breachRanges(prefixes: string[]): Promise<BreachRangesResponse> {
+    return this.authed<BreachRangesResponse>('/breach/ranges', { method: 'POST', body: JSON.stringify({ prefixes } satisfies BreachRangesRequest) });
   }
 
-  async withdrawOrgEmergency(orgId: string): Promise<void> {
-    await this.authed<void>(`/orgs/${encodeURIComponent(orgId)}/emergency`, { method: 'DELETE' });
+  /** Whether the account's address is watched for breaches, and what was found. */
+  async breachWatch(): Promise<BreachWatchState> {
+    return this.authed<BreachWatchState>('/breach/account', { method: 'GET' });
   }
 
-  /** By the contact: starts the wait; the one who named them is mailed. */
-  async requestOrgEmergency(orgId: string, grantorId: string): Promise<OrgDetail> {
-    return this.authed<OrgDetail>(`/orgs/${encodeURIComponent(orgId)}/emergency/${encodeURIComponent(grantorId)}/request`, { method: 'POST', body: '{}' });
+  /** Watches the account's address, looking it up at once, or stops. */
+  async setBreachWatch(watch: boolean): Promise<BreachWatchState> {
+    return this.authed<BreachWatchState>('/breach/account', { method: 'PUT', body: JSON.stringify({ watch } satisfies BreachWatchRequest) });
   }
 
-  /** By the one who named a contact: ends their request. */
-  async refuseOrgEmergency(orgId: string): Promise<OrgDetail> {
-    return this.authed<OrgDetail>(`/orgs/${encodeURIComponent(orgId)}/emergency/refuse`, { method: 'POST', body: '{}' });
+  /** A link between two of the account's products, as this session sees it. */
+  async link(link: string): Promise<LinkState> {
+    return this.authed<LinkState>(`/links/${encodeURIComponent(link)}`, { method: 'GET' });
   }
 
-  async orgEmergencyBox(orgId: string, grantorId: string): Promise<OrgEmergencyBox> {
-    return this.authed<OrgEmergencyBox>(`/orgs/${encodeURIComponent(orgId)}/emergency/${encodeURIComponent(grantorId)}`, { method: 'GET' });
+  /** Puts the link key's boxes: both, from the page turning it on; this product's own, sealed again under a new key. */
+  async putLinkBoxes(link: string, body: LinkBoxesRequest): Promise<LinkState> {
+    return this.authed<LinkState>(`/links/${encodeURIComponent(link)}`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+
+  /** Turns a link off: its boxes and every record in it go. What each product keeps in its own vault stays. */
+  async deleteLink(link: string): Promise<void> {
+    await this.authed<unknown>(`/links/${encodeURIComponent(link)}`, { method: 'DELETE' });
+  }
+
+  async linkPull(link: string, since: number): Promise<PullResponse> {
+    return this.authed<PullResponse>(`/links/${encodeURIComponent(link)}/sync?since=${since}`, { method: 'GET' });
+  }
+
+  async linkPush(link: string, records: RemoteRecord[], baseServerRev: number): Promise<PushResponse> {
+    return this.authed<PushResponse>(`/links/${encodeURIComponent(link)}/sync`, { method: 'POST', body: JSON.stringify({ records, baseServerRev } satisfies PushRequest) });
+  }
+
+  /** A new Send, its body sealed on this device: where to put each of its files. */
+  async createSend(body: SendRequest): Promise<SendCreated> {
+    return this.authed<SendCreated>('/sends', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  /** Every file of a Send is in place: it opens from now on. */
+  async finishSend(id: string): Promise<SendView> {
+    return this.authed<SendView>(`/sends/${encodeURIComponent(id)}/done`, { method: 'POST', body: '{}' });
+  }
+
+  /** The account's Sends that still live. */
+  async sends(): Promise<{ sends: SendView[] }> {
+    return this.authed<{ sends: SendView[] }>('/sends', { method: 'GET' });
+  }
+
+  /** Stops a Send at once, and deletes what it holds. */
+  async deleteSend(id: string): Promise<void> {
+    await this.authed<unknown>(`/sends/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /** Once open: an address to read one of the grantor's files, named by a record of theirs this product opened. */
+  async emergencyFileAddress(grantId: string, fileId: string): Promise<FileAddress> {
+    return this.authed<FileAddress>(`/emergency/named-by/${encodeURIComponent(grantId)}/files/${encodeURIComponent(fileId)}`, { method: 'GET' });
+  }
+
+  /** Emergency access between any two accounts: the caller's contact key, pins, whom they named and who named them. */
+  async emergency(): Promise<EmergencyState> {
+    return this.authed<EmergencyState>('/emergency', { method: 'GET' });
+  }
+
+  /** The caller's contact key: made once, then a box of it for each product. */
+  async putContactKey(body: EmergencyKeyRequest): Promise<EmergencyState> {
+    return this.authed<EmergencyState>('/emergency/key', { method: 'PUT', body: JSON.stringify(body) });
+  }
+
+  /** Names someone by address, on a paid plan. */
+  async nameEmergencyContact(body: EmergencyNameRequest): Promise<EmergencyState> {
+    return this.authed<EmergencyState>('/emergency/contacts', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  async changeEmergencyContact(grantId: string, body: EmergencyChangeRequest): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/contacts/${encodeURIComponent(grantId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+  }
+
+  /** By the grantor: ends the grant, whatever its state. */
+  async removeEmergencyContact(grantId: string): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/contacts/${encodeURIComponent(grantId)}`, { method: 'DELETE' });
+  }
+
+  /** By the grantor: ends the contact's request. */
+  async refuseEmergency(grantId: string): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/contacts/${encodeURIComponent(grantId)}/refuse`, { method: 'POST', body: '{}' });
+  }
+
+  /** By the grantor: a product's key sealed to the contact's key. */
+  async putEmergencyKeyBox(grantId: string, product: string, box: OrgBox): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/contacts/${encodeURIComponent(grantId)}/boxes/${encodeURIComponent(product)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ box }),
+    });
+  }
+
+  /** Either side: its pin of the other's key, under one of its products' keys. */
+  async putContactPin(contactId: string, product: string, box: OrgBox): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/pins/${encodeURIComponent(contactId)}`, { method: 'PUT', body: JSON.stringify({ product, box }) });
+  }
+
+  /** By the one named: accepts, signed in with the address named. */
+  async acceptEmergency(grantId: string): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/named-by/${encodeURIComponent(grantId)}/accept`, { method: 'POST', body: '{}' });
+  }
+
+  /** By the one named: declines, or no longer holds it. */
+  async leaveEmergency(grantId: string): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/named-by/${encodeURIComponent(grantId)}`, { method: 'DELETE' });
+  }
+
+  /** By the contact: asks; the grantor is mailed and has the wait to refuse. */
+  async requestEmergency(grantId: string): Promise<EmergencyState> {
+    return this.authed<EmergencyState>(`/emergency/named-by/${encodeURIComponent(grantId)}/request`, { method: 'POST', body: '{}' });
+  }
+
+  /** By the contact, once open: the boxes of the products this session reads with. */
+  async emergencyBoxes(grantId: string): Promise<{ grantorId: string; boxes: { product: string; box: OrgBox }[] }> {
+    return this.authed(`/emergency/named-by/${encodeURIComponent(grantId)}/boxes`, { method: 'GET' });
+  }
+
+  /** By the contact, once open: the grantor's records of this session's product, read only. */
+  async emergencyPull(grantId: string, since: number): Promise<EmergencyPullResponse> {
+    return this.authed<EmergencyPullResponse>(`/emergency/named-by/${encodeURIComponent(grantId)}/sync?since=${since}`, { method: 'GET' });
   }
 
   /** By an organiser: the next recovery key, to every organiser. */

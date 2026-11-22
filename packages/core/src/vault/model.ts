@@ -1,7 +1,9 @@
 import type { SealedBox } from '../crypto/aead.js';
 import type { KdfParams } from '../crypto/kdf.js';
+import type { Plan } from '../plan.js';
 import type { GeneratorOptions } from '../generator.js';
 import { DEFAULT_GENERATOR } from '../generator.js';
+import type { ItemVersion } from './versions.js';
 
 export const VAULT_FORMAT = 'passhold.vault';
 export const VAULT_FILE_VERSION = 1;
@@ -28,7 +30,31 @@ export const LIMITS = {
   fieldName: 200,
   fieldValue: 10_000,
   fields: 50,
+  /** Files kept with one item: each is a line in its record, which the account takes up to 64 KiB. */
+  attachments: 50,
+  fileName: 255,
 } as const;
+
+/**
+ * A file kept with an item. Its bytes are in the Keyrook account's store,
+ * sealed on the device that added it under a key made for that file alone
+ * (@keyrook/account, `uploadFile`). The key is here, in the item's own sealed
+ * record, and nowhere else: whoever opens the record opens the file, and
+ * nothing on the server says which record a file belongs to.
+ */
+export interface Attachment {
+  /** The file's id in the account: all the server knows it by. */
+  id: string;
+  /** What opens it, base64. Pages are handed it only for the one file they are opening. */
+  key: string;
+  /** Its name, as it was added: one line, shown as text. */
+  name: string;
+  /** Its type as the browser that added it named it; '' when it did not. A page shows a file by it, and never runs one. */
+  type: string;
+  /** Its size before sealing, in bytes. */
+  size: number;
+  addedAt: number;
+}
 
 /**
  * A line of its owner's own on an item: a security question's answer, a PIN,
@@ -65,6 +91,12 @@ export interface StoredPasskey {
 export interface PasswordChange {
   password: string;
   changedAt: number;
+  /**
+   * The hidden field this value was, by name; absent for the login's own
+   * password. A PIN or an answer replaced by mistake is as lost as a password
+   * would be, so it is kept the same way.
+   */
+  field?: string;
 }
 
 /** One saved sign-in. */
@@ -90,6 +122,12 @@ export interface LoginItem {
   /** The folder it is filed in, by name; '' for none. */
   folder: string;
   fields: CustomField[];
+  /** What it was before each edit, newest first, on a plan that keeps them (vault/versions.ts); absent for none. */
+  versions?: ItemVersion<LoginDraft>[];
+  /** Files kept with it (vault/attachments.ts); absent for none. An edit leaves them as they are. */
+  attachments?: Attachment[];
+  /** The ids of files taken off it, so a copy from before does not bring them back; absent for none. */
+  detached?: string[];
 }
 
 /**
@@ -113,9 +151,10 @@ export interface PasskeyFor {
 }
 
 /**
- * What Passhold keeps besides logins: payment cards, addresses and notes —
- * the wallet. None belongs to a site, so none is offered by site: a card or
- * an address is filled where its owner chooses it, and a note never.
+ * What Passhold keeps besides logins: payment cards, addresses, notes and
+ * SSH keys — the wallet. None belongs to a site, so none is offered by site:
+ * a card or an address is filled where its owner chooses it, and a note or
+ * an SSH key never.
  */
 interface WalletBase {
   id: string;
@@ -130,6 +169,12 @@ interface WalletBase {
   /** The folder it is filed in, by name; '' for none. Logins and the wallet share folders. */
   folder: string;
   fields: CustomField[];
+  /** What it was before each edit, newest first, on a plan that keeps them (vault/versions.ts); absent for none. */
+  versions?: ItemVersion<WalletDraft>[];
+  /** Files kept with it (vault/attachments.ts); absent for none. An edit leaves them as they are. */
+  attachments?: Attachment[];
+  /** The ids of files taken off it, so a copy from before does not bring them back; absent for none. */
+  detached?: string[];
 }
 
 export interface CardItem extends WalletBase {
@@ -170,10 +215,63 @@ export interface NoteItem extends WalletBase {
   text: string;
 }
 
-export type WalletItem = CardItem | AddressItem | NoteItem;
+/**
+ * An SSH key: the private key file as OpenSSH writes it, and what that file
+ * says of itself (ssh.ts) — its public key and fingerprint, read from it when
+ * it is saved, never typed beside it. Never filled into a page: it is there
+ * to be copied, and for a terminal to sign with.
+ */
+export interface SshKeyItem extends WalletBase {
+  kind: 'ssh';
+  privateKey: string;
+  /** The line an `authorized_keys` file takes. */
+  publicKey: string;
+  /** `SHA256:…`, as `ssh-keygen -l` prints it. */
+  fingerprint: string;
+  notes: string;
+}
+
+/**
+ * A key a program uses to reach a service: Stripe's, GitHub's, a cloud's.
+ * Never filled into a page — like an SSH key, it is copied, or read by a
+ * command (`passhold://…/key`). Every field is kept, the ones no page edits
+ * yet included, so that a build that does not show one never drops it when
+ * it saves the item.
+ */
+export interface ApiKeyItem extends WalletBase {
+  kind: 'apikey';
+  /** The service, by its slug in the brand catalogue (`stripe`, `github`…); '' for one it does not list. */
+  service: string;
+  /** The secret itself. Out of sight until asked for, as a password is. */
+  key: string;
+  /** The part that is not secret, where the service has one: an access key id, a client id, a username. */
+  keyId: string;
+  /** Where the key may be sent: a host, or `*.example.com` for a host and every one under it. */
+  hosts: string[];
+  /** How a request carries it: `bearer`, `basic` (the id and the key), `header:<name>` or `query:<name>`. */
+  sendAs: string;
+  /** The environment variable a command reads it from (`STRIPE_API_KEY`); '' for none. */
+  env: string;
+  /** Its owner's words: production, test, development. */
+  environment: string;
+  /** Its owner's words: what the service lets it do. */
+  scopes: string;
+  /** Days, each as midnight UTC of that date: a key is issued and expires on a date, not at an hour. Null when not given. */
+  issuedAt: number | null;
+  expiresAt: number | null;
+  notes: string;
+  /**
+   * The keys it held before, and what its hidden fields held, newest first —
+   * kept as a login keeps its passwords, so a key replaced by mistake is not
+   * lost. The vault keeps it; no edit gives it.
+   */
+  history: PasswordChange[];
+}
+
+export type WalletItem = CardItem | AddressItem | NoteItem | SshKeyItem | ApiKeyItem;
 export type WalletKind = WalletItem['kind'];
 
-type Editable<T extends WalletItem> = Omit<T, 'id' | 'favorite' | 'createdAt' | 'updatedAt' | 'lastUsedAt' | 'deletedAt' | 'folder' | 'fields'> & {
+type Editable<T extends WalletItem> = Omit<T, 'id' | 'favorite' | 'createdAt' | 'updatedAt' | 'lastUsedAt' | 'deletedAt' | 'folder' | 'fields' | 'versions' | 'attachments' | 'detached' | 'history'> & {
   favorite?: boolean;
   /** Left out of an edit, the item keeps its own: a checkout saved over a card changes what the checkout sent. */
   folder?: string;
@@ -182,8 +280,10 @@ type Editable<T extends WalletItem> = Omit<T, 'id' | 'favorite' | 'createdAt' | 
 export type CardDraft = Editable<CardItem>;
 export type AddressDraft = Editable<AddressItem>;
 export type NoteDraft = Editable<NoteItem>;
+export type SshKeyDraft = Editable<SshKeyItem>;
+export type ApiKeyDraft = Editable<ApiKeyItem>;
 /** The fields a person edits, by kind; everything else the vault keeps itself. */
-export type WalletDraft = CardDraft | AddressDraft | NoteDraft;
+export type WalletDraft = CardDraft | AddressDraft | NoteDraft | SshKeyDraft | ApiKeyDraft;
 
 export interface VaultSettings {
   /** Lock after this many minutes without use. 0: only when the browser closes. */
@@ -327,6 +427,24 @@ export interface AccountLink {
    * the old shared key, to be taken down once signed in again.
    */
   passkey: string | null;
+  /**
+   * The plan the account's server last named (`GET /account/billing`, read as
+   * Passhold syncs): kept, so that a server that cannot be asked takes away
+   * nothing. None before the first answer, which is the free plan.
+   */
+  plan?: Plan;
+  /**
+   * Whether that server sold plans when it last said (`plansOfferedFromBilling`):
+   * until it does, nothing of a paid plan is shown, nor offered for sale. None
+   * before the first answer, which is no.
+   */
+  plansOffered?: boolean;
+  /**
+   * Files no item names any more — a trash emptied, a file taken off — still
+   * to delete in the account, so a delete that could not reach it is tried
+   * again at the next sync rather than left taking room. Absent for none.
+   */
+  filesToDelete?: string[];
 }
 
 export type SignInProvider = 'google' | 'github';
@@ -403,6 +521,8 @@ export interface FamilyVault extends Items {
   generation: number;
   /** Someone who left the family still holds its key: what is changed here waits, unsent, until an organiser changes it. */
   keyDue: boolean;
+  /** This account may fill and copy from it, never change it: the flows' word (`FamilyCollection.canEdit`), and the server's. */
+  viewOnly?: boolean;
   /** What this device knows of each of its records, as `AccountLink.known` does of the vault's own. */
   known: Record<string, KnownRecord>;
 }

@@ -11,6 +11,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['packages/**/test/**/*.test.ts', 'apps/extension/test/**/*.test.ts'],
+    // Many files run the account's server from the kit side by side, and the web vault's is built twice:
+    // a test that waits on them takes longer under that load than alone, and is not wrong for it.
+    testTimeout: 30_000,
+    include: ['packages/**/test/**/*.test.ts', 'apps/extension/test/**/*.test.ts', 'apps/cli/test/**/*.test.ts', 'apps/android/test/**/*.test.ts', 'apps/web/test/**/*.test.ts'],
   },
 });

@@ -85,6 +85,30 @@ describe('what a sent sign-in means', () => {
     expect(judgeCapture(saved.data, page('https://other.com'), 'alice', 'old-password').kind).toBe('new');
   });
 
+  it('takes a username typed in other capitals for the same account, not a second one', () => {
+    expect(judgeCapture(saved.data, page('https://example.com'), 'Alice ', 'old-password').kind).toBe('known');
+    expect(judgeCapture(saved.data, page('https://example.com'), 'ALICE', 'new-password')).toMatchObject({ kind: 'update' });
+  });
+
+  it('never guesses which of several logins a password-only form changes', () => {
+    const two = addLogin(saved.data, { title: 'Work', username: 'alice@work.test', password: 'work-password', urls: ['https://example.com'], notes: '' });
+    // One login on the site: a password alone is for it.
+    expect(judgeCapture(saved.data, page('https://example.com'), '', 'new-password')).toMatchObject({ kind: 'update' });
+    // Two: a password alone could be either, and a wrong guess overwrites the other one.
+    expect(judgeCapture(two.data, page('https://example.com'), '', 'new-password').kind).toBe('unsure');
+    // Unless the form held the password being changed: that names the login.
+    const verdict = judgeCapture(two.data, page('https://example.com'), '', 'new-password', 'work-password');
+    expect(verdict).toMatchObject({ kind: 'update', item: { username: 'alice@work.test' } });
+    // A password the site already has, typed again, is nothing new.
+    expect(judgeCapture(two.data, page('https://example.com'), '', 'work-password').kind).toBe('known');
+  });
+
+  it('does not save a second login for one kept without its username', () => {
+    const nameless = addLogin(emptyData(), { title: '', username: '', password: 'pw-1', urls: ['https://example.com'], notes: '' });
+    expect(judgeCapture(nameless.data, page('https://example.com'), 'alice', 'pw-1').kind).toBe('known');
+    expect(judgeCapture(nameless.data, page('https://example.com'), 'alice', 'pw-2').kind).toBe('new');
+  });
+
   it('stays quiet on a site its owner said never to save', () => {
     const data = { ...saved.data, neverSave: ['example.com'] };
     expect(judgeCapture(data, page('https://www.example.com'), 'bob', 'x').kind).toBe('neverSave');

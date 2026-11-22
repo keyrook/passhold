@@ -25,7 +25,17 @@ export type ErrorCode =
   | 'pairingRefused'
   | 'passkeyWrong'
   | 'kdfUnsupported'
-  | 'familyOrganiserOnly';
+  | 'familyOrganiserOnly'
+  /** An item holds as many files as it may. */
+  | 'attachmentsFull'
+  /** A file is larger than the account keeps. */
+  | 'fileTooLarge'
+  /** An item with files moves into a shared vault only once they are off it: they are its owner's in the account, not the family's. */
+  | 'filesStay'
+  /** A shared vault this account may only view: every change refused, whatever a page sends. */
+  | 'viewOnly'
+  /** What the owner's plan does not hold, asked for all the same. */
+  | 'notOnPlan';
 
 export class PassholdError extends Error {
   override readonly name = 'PassholdError';

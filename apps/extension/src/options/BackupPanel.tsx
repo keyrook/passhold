@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
-  importFile,
+  chooseKeys,
+  importFileBytes,
   MAX_BACKUP_BYTES,
   parseBackup,
   PassholdError,
@@ -105,7 +106,7 @@ export function BackupPanel({
     return (
       <>
         <SubpageHeader title={t('settings.export')} description={t('settings.exportBody')} onBack={back} />
-        <Export secret={secret} device={device} keys={keys} />
+        <Export secret={secret} device={device} keys={keys} apiKeys={data.wallet.some((item) => item.kind === 'apikey' && item.deletedAt === null)} />
       </>
     );
   }
@@ -277,6 +278,7 @@ function useWhatFound() {
       [of('card'), 'settings.importCards'],
       [of('address'), 'settings.importAddresses'],
       [of('note'), 'settings.importNotes'],
+      [of('apikey'), 'settings.importApiKeys'],
     ];
     const said = counts.filter(([count]) => count > 0).map(([count, key]) => t(key, { count }));
     return new Intl.ListFormat(t.locale, { type: 'conjunction' }).format(said);
@@ -288,7 +290,9 @@ function Import({ data }: { data: VaultData }) {
   const whatFound = useWhatFound();
   const input = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
-  const [imported, setImported] = useState<ImportResult | null>(null);
+  const [imported, setImported] = useState<Pick<ImportResult, 'drafts' | 'passkeys' | 'wallet' | 'twoFactor' | 'passkeysLeft'> | null>(null);
+  // Which of the entries that look like API keys come as keys: all, until their owner unticks one.
+  const [asKeys, setAsKeys] = useState<ReadonlySet<number>>(new Set());
   const { busy, error, setError, run } = useAction();
 
   const choose = async (file: File | undefined) => {
@@ -297,7 +301,10 @@ function Import({ data }: { data: VaultData }) {
     setError(null);
     if (!file) return;
     try {
-      setResult(await importFile(await file.text(), data));
+      // As bytes: a .1pux is a ZIP archive, and any other file is read as text from them.
+      const read = await importFileBytes(new Uint8Array(await file.arrayBuffer()), data);
+      setAsKeys(new Set(read.keys.map((_, index) => index)));
+      setResult(read);
     } catch (caught) {
       const { key, values } = describeError(caught);
       setError(t(key, values));
@@ -307,19 +314,45 @@ function Import({ data }: { data: VaultData }) {
   };
 
   const found = result ? result.drafts.length + result.passkeys.length + result.wallet.length : 0;
+  const chosen = result ? chooseKeys(result, asKeys) : null;
   // Said before the import and after it: after is when the old manager gets deleted.
   const twoFactor = (result ?? imported)?.twoFactor ?? 0;
   const passkeysLeft = (result ?? imported)?.passkeysLeft ?? 0;
   return (
     <Section id="import">
       <Card>
-        <input ref={input} type="file" accept=".csv,.json,text/csv,application/json" className="hidden" onChange={(event) => void choose(event.target.files?.[0])} data-testid="import-file" />
+        <input ref={input} type="file" accept=".csv,.json,.1pux,text/csv,application/json" className="hidden" onChange={(event) => void choose(event.target.files?.[0])} data-testid="import-file" />
         <div>
           <Button onClick={() => input.current?.click()}>{t('settings.importChoose')}</Button>
         </div>
+        <p className="text-[12.5px] text-neutral-600 dark:text-neutral-400">{t('settings.importOnePux')}</p>
         {result && (
           <div className="flex flex-col gap-2 rounded-xl bg-neutral-100 p-3 text-[13px] dark:bg-neutral-800">
-            {found ? <p>{t('settings.importFound', { what: whatFound(result) })}</p> : <p>{t('settings.importNothing')}</p>}
+            {found ? <p>{t('settings.importFound', { what: whatFound({ drafts: chosen!.logins, passkeys: chosen!.passkeys, wallet: chosen!.wallet }) })}</p> : <p>{t('settings.importNothing')}</p>}
+            {result.keys.length > 0 && (
+              <fieldset className="flex flex-col gap-1.5 rounded-lg bg-white p-2.5 dark:bg-neutral-900" data-testid="import-keys">
+                <legend className="px-1 font-medium">{t('settings.importKeysTitle')}</legend>
+                <p className="text-[12.5px] text-neutral-600 dark:text-neutral-400">{t('settings.importKeysBody')}</p>
+                {result.keys.map((candidate, index) => (
+                  <label key={index} className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={asKeys.has(index)}
+                      onChange={(event) =>
+                        setAsKeys((now) => {
+                          const next = new Set(now);
+                          if (event.target.checked) next.add(index);
+                          else next.delete(index);
+                          return next;
+                        })
+                      }
+                      className="h-4 w-4 accent-brand-600"
+                    />
+                    <span className="truncate">{candidate.draft.title || candidate.draft.keyId}</span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
             {result.skipped > 0 && <p>{t('settings.importSkipped', { count: result.skipped })}</p>}
             {result.duplicates > 0 && <p>{t('settings.importDuplicates', { count: result.duplicates })}</p>}
             {found > 0 && (
@@ -330,8 +363,9 @@ function Import({ data }: { data: VaultData }) {
                   disabled={busy}
                   onClick={() =>
                     void run(async () => {
-                      await send({ type: 'vault/mutate', mutation: { op: 'import', logins: result.drafts, passkeys: result.passkeys, wallet: result.wallet } });
-                      setImported(result);
+                      const { logins, passkeys, wallet } = chooseKeys(result, asKeys);
+                      await send({ type: 'vault/mutate', mutation: { op: 'import', logins, passkeys, wallet } });
+                      setImported({ drafts: logins, passkeys, wallet, twoFactor: result.twoFactor, passkeysLeft: result.passkeysLeft });
                       setResult(null);
                     })
                   }
@@ -367,21 +401,25 @@ function Import({ data }: { data: VaultData }) {
   );
 }
 
-function Export({ secret, device, keys }: { secret: VaultSecret; device: DeviceCredential | null; keys: SecurityKey[] }) {
+/** `apiKeys`: the vault holds some, which go out as a CSV file of their own: the logins' columns, which every browser reads, have no place for them. */
+function Export({ secret, device, keys, apiKeys }: { secret: VaultSecret; device: DeviceCredential | null; keys: SecurityKey[]; apiKeys: boolean }) {
   const t = useT();
   const proof = useProof({ secret, device, keys });
   const [done, setDone] = useState(false);
   const { busy, error, run } = useAction();
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const exportAs = (kind?: 'apikey') => {
     if (!proof.ready || busy) return;
     void run(async () => {
-      const { csv } = await send({ type: 'vault/exportCsv', proof: await proof.get() });
-      download(`passhold-${today()}.csv`, csv, 'text/csv');
+      const { csv } = await send({ type: 'vault/exportCsv', proof: await proof.get(), ...(kind ? { kind } : {}) });
+      download(kind ? `passhold-api-keys-${today()}.csv` : `passhold-${today()}.csv`, csv, 'text/csv');
       proof.reset();
       setDone(true);
     });
+  };
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    exportAs();
   };
 
   return (
@@ -389,10 +427,15 @@ function Export({ secret, device, keys }: { secret: VaultSecret; device: DeviceC
       <Card>
         <form onSubmit={submit} className="flex flex-col gap-3">
           {proof.field}
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={!proof.ready || busy}>
               {t('settings.exportButton')}
             </Button>
+            {apiKeys && (
+              <Button disabled={!proof.ready || busy} onClick={() => exportAs('apikey')}>
+                {t('settings.exportApiKeys')}
+              </Button>
+            )}
           </div>
         </form>
         {done && <Callout tone="info">{t('settings.exportDone')}</Callout>}

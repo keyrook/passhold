@@ -191,8 +191,8 @@ export type OpenedProductKey =
    * This product's key, from its box. `rootChanged`: the root is not the one
    * this device last pinned. `mustReplace`: the recovery key leaked, and this
    * product replaces its key now (`replaceProductKey`). `rootSeen`: someone
-   * else opened the root, and could again until it is
-   * replaced (`replaceAccountRoot`); the product says so.
+   * else opened the root (`RootSeen`), and could again until it is replaced
+   * (`replaceAccountRoot`); the product says so.
    */
   | { status: 'open'; productKey: ProductKey; rootChanged: boolean; mustReplace: boolean; rootSeen: RootSeen[] }
   /**

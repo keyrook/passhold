@@ -5,7 +5,7 @@ want to hear about it before anyone else does.
 
 ## Reporting
 
-Email **brickitall.hi@gmail.com** with "Security" in the subject line. Please
+Email **hello@keyrook.com** with "Security" in the subject line. Please
 include:
 
 - what an attacker could do, and what they would need first;

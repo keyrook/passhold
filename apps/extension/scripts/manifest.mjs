@@ -12,14 +12,15 @@
  *
  * Nothing else reaches the web: no `host_permissions` at install — one,
  * optional, for the Keyrook account's page, asked for only to sign in with its
- * passkeys — no `scripting`, no `tabs`, and one address on the network — the
- * Keyrook account's server, for whoever signs in (scripts/api.mjs). That server is also the one web page
+ * passkeys — no `scripting`, no `tabs`, and two addresses on the network — the
+ * Keyrook account's server, for whoever signs in, and the store its files are
+ * sealed into (scripts/api.mjs). That server is also the one web page
  * that may send Passhold a message: how a sign-in with Google or GitHub,
  * made in Passhold's own tab, comes back to it.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { accountPageFor, accountRpFor, checkApi, OFFICIAL_API } from './api.mjs';
+import { accountPageFor, accountRpFor, checkApi, filesStoreFor, OFFICIAL_API, vaultPageFor } from './api.mjs';
 
 export const CONTENT_MATCHES = ['http://*/*', 'https://*/*'];
 
@@ -41,6 +42,17 @@ export const CONTENT_MATCHES = ['http://*/*', 'https://*/*'];
  */
 const keyrookAccountPage = (api) => `${accountPageFor(api)}/*`;
 
+/**
+ * Passhold's own web vault (vault.keyrook.com): a page that holds the
+ * account's password, its passkeys' PRF answers and the opened vault, as the
+ * account's page holds the password. No script of Passhold's runs there at
+ * all: nothing is offered to be saved or filled in it, and its passkey
+ * requests — for the account's passkeys, which open the root — go to the
+ * browser alone. The worker refuses anything from that origin besides
+ * (`VAULT_PAGE_ORIGIN`).
+ */
+const keyrookVaultPage = (api) => `${vaultPageFor(api)}/*`;
+
 export const CONTENT_EXCLUDES = [
   'https://challenges.cloudflare.com/*',
   '*://*/cdn-cgi/*',
@@ -53,16 +65,21 @@ export const CONTENT_EXCLUDES = [
 /**
  * Content Security Policy for every extension page.
  *
- * - `connect-src` the Keyrook server and nothing else: what reaches it is
- *   sealed before it leaves, and only for an owner who signed in. A bug cannot
- *   become a way out anywhere else, and a favicon or breach check that would
- *   tell a server every site its owner has an account on cannot be added by
- *   accident.
- * - `img-src 'self' data:`: bundled artwork only, for the same reason.
+ * - `connect-src` the Keyrook server and, beside it, the store the files
+ *   kept with items and sent in a Send go to (`filesStoreFor`), and nothing
+ *   else: what reaches either is sealed before it leaves, and only for an
+ *   owner who signed in. A bug cannot become a way out anywhere else, and a
+ *   favicon that would tell a server every site its owner has an account on
+ *   cannot be added by accident. The store learns a file's sealed size, for
+ *   the minutes the server's address for it lasts, and nothing else; the
+ *   kit's answers on the server's own address, so a test build names none.
+ * - `img-src 'self' data:`: bundled artwork only, for the same reason — and a
+ *   picture a file holds, drawn from its bytes here, never fetched.
  * - `style-src 'unsafe-inline'`: React writes inline style attributes. Script
  *   stays locked to the package.
  */
 function contentSecurityPolicy(api) {
+  const store = filesStoreFor(api);
   return [
     "script-src 'self'",
     "object-src 'none'",
@@ -70,7 +87,7 @@ function contentSecurityPolicy(api) {
     "img-src 'self' data:",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
-    `connect-src ${api}`,
+    `connect-src ${api}${store ? ` ${store}` : ''}`,
     "frame-src 'none'",
     "child-src 'none'",
     "form-action 'none'",
@@ -123,7 +140,7 @@ export function buildManifest({ version, api = OFFICIAL_API, built, test = false
     content_scripts: [
       {
         matches: CONTENT_MATCHES,
-        exclude_matches: CONTENT_EXCLUDES,
+        exclude_matches: [...CONTENT_EXCLUDES, keyrookVaultPage(api)],
         js: ['content.js'],
         // Sign-in forms often live in an iframe of the site's own.
         all_frames: true,
@@ -134,8 +151,9 @@ export function buildManifest({ version, api = OFFICIAL_API, built, test = false
       // world (webauthn.js, which holds nothing) and beside it (bridge.js),
       // in the top frame, where Passhold's frame for the choice is drawn.
       // Never on the Keyrook account's page, whose passkeys are the browser's alone.
-      { matches: CONTENT_MATCHES, exclude_matches: [...CONTENT_EXCLUDES, keyrookAccountPage(api)], js: ['bridge.js'], run_at: 'document_start' },
-      { matches: CONTENT_MATCHES, exclude_matches: [...CONTENT_EXCLUDES, keyrookAccountPage(api)], js: ['webauthn.js'], run_at: 'document_start', world: 'MAIN' },
+      // Never on the web vault's either, which asks for those same passkeys.
+      { matches: CONTENT_MATCHES, exclude_matches: [...CONTENT_EXCLUDES, keyrookAccountPage(api), keyrookVaultPage(api)], js: ['bridge.js'], run_at: 'document_start' },
+      { matches: CONTENT_MATCHES, exclude_matches: [...CONTENT_EXCLUDES, keyrookAccountPage(api), keyrookVaultPage(api)], js: ['webauthn.js'], run_at: 'document_start', world: 'MAIN' },
     ],
 
     // The inline list, the save prompt and the passkey frame are extension

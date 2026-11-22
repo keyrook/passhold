@@ -4,6 +4,7 @@
  * turn and nothing is half-changed if sealing fails.
  */
 import { PassholdError } from '../errors.js';
+import { readPlan } from '../plan.js';
 import { normaliseGenerator } from '../generator.js';
 import { matchUrls, normaliseUrl, siteName, siteOf, type MatchStrength, type Site } from '../match.js';
 import { isValidPin } from './pin.js';
@@ -13,6 +14,9 @@ import { newId } from '../util/id.js';
 import { rpIdKeepable } from '../webauthn/request.js';
 import { cleanFields, cleanFolder, cleanVaultName, fieldWords, settleFolder } from './folders.js';
 import { cleanWallet } from './wallet.js';
+import { readAttachments, readFileIds } from './attachments.js';
+import { afterEdit, cleanVersions, type ItemVersion } from './versions.js';
+import { cleanHistory, replacedHidden } from './history.js';
 import {
   AUTO_LOCK_CHOICES,
   CLIPBOARD_CHOICES,
@@ -20,6 +24,7 @@ import {
   HISTORY_LIMIT,
   LIMITS,
   type AccountKitLink,
+  type CustomField,
   type PendingStartOver,
   type AccountLink,
   type KnownRecord,
@@ -57,15 +62,6 @@ function cleanUrls(value: unknown): string[] {
     if (urls.length >= LIMITS.urls) break;
   }
   return urls;
-}
-
-function cleanHistory(value: unknown): PasswordChange[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((entry): entry is PasswordChange => typeof entry === 'object' && entry !== null)
-    .map((entry) => ({ password: text(entry.password, LIMITS.password), changedAt: time(entry.changedAt) ?? 0 }))
-    .filter((entry) => entry.password)
-    .slice(0, HISTORY_LIMIT);
 }
 
 const B64URL = /^[A-Za-z0-9_-]+$/;
@@ -117,7 +113,27 @@ export function cleanLogin(value: unknown): LoginItem | null {
     passkey: cleanPasskey(raw.passkey),
     folder: cleanFolder(raw.folder),
     fields: cleanFields(raw.fields),
+    ...versionsOf(raw.versions),
+    ...readAttachments(raw),
   };
+}
+
+/** What a login holds that an edit gives it: the draft a version keeps. */
+export function loginDraftOf(item: LoginItem): LoginDraft {
+  return { title: item.title, username: item.username, password: item.password, urls: item.urls, notes: item.notes, folder: item.folder, fields: item.fields };
+}
+
+/**
+ * A login's versions as stored, each read as a login is; none at all for an
+ * item with none, so a login from before versions reads, hashes and syncs as
+ * it did. A version's own versions are never read.
+ */
+function versionsOf(value: unknown): { versions?: ItemVersion<LoginDraft>[] } {
+  const versions = cleanVersions(value, (raw) => {
+    const login = cleanLogin({ ...raw, id: 'version', versions: undefined });
+    return login && loginDraftOf(login);
+  });
+  return versions ? { versions } : {};
 }
 
 function oneOf<T extends number>(value: unknown, choices: readonly T[], fallback: T): T {
@@ -248,7 +264,16 @@ function cleanAccount(value: unknown): AccountLink | null {
     // As stored; a link from before it was kept says only its provider, which then meant no password.
     passwordless: typeof raw.passwordless === 'boolean' ? raw.passwordless : raw.provider === 'google' || raw.provider === 'github',
     passkey: short(raw.passkey, 512),
+    ...(keyed && raw.plan !== undefined ? { plan: readPlan(raw.plan) } : {}),
+    ...(keyed && typeof raw.plansOffered === 'boolean' ? { plansOffered: raw.plansOffered } : {}),
+    ...(keyed ? filesToDeleteOf(raw.filesToDelete) : {}),
   };
+}
+
+/** Files no item names any more, still to delete in the account: none at all for a link with none, so one from before files reads as it did. */
+function filesToDeleteOf(value: unknown): { filesToDelete?: string[] } {
+  const ids = readFileIds(value);
+  return ids.length ? { filesToDelete: ids } : {};
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -346,7 +371,17 @@ function cleanFamilyVaults(value: unknown): FamilyVault[] {
         items.push(item);
       }
     }
-    vaults.push({ id, name, generation: generation(raw.generation), keyDue: raw.keyDue === true, items, wallet: cleanWallet(raw.wallet, seen), known: cleanKnown(raw.known) });
+    vaults.push({
+      id,
+      name,
+      generation: generation(raw.generation),
+      keyDue: raw.keyDue === true,
+      // Kept across a lock: a vault this account may only view stays so until a sync with the family says otherwise.
+      ...(raw.viewOnly === true ? { viewOnly: true } : {}),
+      items,
+      wallet: cleanWallet(raw.wallet, seen),
+      known: cleanKnown(raw.known),
+    });
   }
   return vaults;
 }
@@ -474,7 +509,8 @@ export function savePasskey(data: VaultData, url: string, passkey: StoredPasskey
     const item: LoginItem = { ...target, passkey, updatedAt: now };
     const items = data.items.map((entry) => (entry.id === target.id ? item : entry));
     if (target.passkey) {
-      items.push({ ...target, id: newId(), password: '', history: [], favorite: false, updatedAt: now, deletedAt: now, lastUsedAt: null });
+      const { versions: _, ...copy } = target;
+      items.push({ ...copy, id: newId(), password: '', history: [], favorite: false, updatedAt: now, deletedAt: now, lastUsedAt: null });
     }
     return { data: { ...data, items }, item };
   }
@@ -500,12 +536,16 @@ export function savePasskey(data: VaultData, url: string, passkey: StoredPasskey
   return { data: { ...data, items: [...data.items, item] }, item };
 }
 
-/** Apply an edit. A new password pushes the old one onto the login's history. */
-export function updateLogin<T extends Items>(data: T, id: string, draft: LoginDraft, now = Date.now()): T {
+/**
+ * Apply an edit. A new password pushes the old one onto the login's history,
+ * and a hidden field changed or removed pushes what it held.
+ */
+export function updateLogin<T extends Items>(data: T, id: string, draft: LoginDraft, now = Date.now(), options: EditOptions = {}): T {
   const item = find(data, id);
   const clean = cleanDraft(draft);
   const passwordChanged = clean.password !== item.password;
-  return replace(data, {
+  const replaced = [...(passwordChanged && item.password ? [{ password: item.password, changedAt: now }] : []), ...replacedHidden(item.fields, clean.fields, now)];
+  const next: LoginItem = {
     ...item,
     ...clean,
     favorite: clean.favorite ?? item.favorite,
@@ -513,11 +553,26 @@ export function updateLogin<T extends Items>(data: T, id: string, draft: LoginDr
     fields: clean.fields ?? item.fields,
     updatedAt: now,
     passwordChangedAt: passwordChanged ? now : item.passwordChangedAt,
-    history:
-      passwordChanged && item.password
-        ? [{ password: item.password, changedAt: now }, ...item.history].slice(0, HISTORY_LIMIT)
-        : item.history,
-  });
+    history: replaced.length ? [...replaced, ...item.history].slice(0, HISTORY_LIMIT) : item.history,
+  };
+  const versions = afterEdit(item.versions, loginDraftOf(item), loginDraftOf(next), now, options.versions === true);
+  return replace(data, versions ? { ...next, versions } : next);
+}
+
+/** How an edit is kept: `versions`, whether what the item was is kept as a version — on a plan that holds them. */
+export interface EditOptions {
+  versions?: boolean;
+}
+
+/**
+ * A login as one of its versions was. It is an edit like any other: what the
+ * login is now becomes a version in turn, and a password it replaces goes into
+ * its history, so restoring is never the end of anything.
+ */
+export function restoreLoginVersion<T extends Items>(data: T, id: string, savedAt: number, now = Date.now(), options: EditOptions = {}): T {
+  const version = find(data, id).versions?.find((entry) => entry.savedAt === savedAt);
+  if (!version) throw new PassholdError('itemNotFound');
+  return updateLogin(data, id, version.draft, now, options);
 }
 
 export function setFavorite<T extends Items>(data: T, id: string, favorite: boolean): T {
@@ -615,26 +670,51 @@ export function passkeyLogins(data: VaultData, rpId: string, allow: readonly str
 
 /**
  * What a sign-in just sent on a page would mean for the vault: a new login,
- * a new password for one already saved, or nothing new at all.
+ * a new password for one already saved, or nothing new at all. `unsure` is a
+ * form that names no account while the site has several: which one it
+ * changes would be a guess, and a wrong guess overwrites someone's password.
  */
 export type CaptureVerdict =
   | { kind: 'new' }
   | { kind: 'update'; item: LoginItem }
   | { kind: 'known' }
+  | { kind: 'unsure' }
   | { kind: 'neverSave' };
 
-export function judgeCapture(data: VaultData, page: Site, username: string, password: string): CaptureVerdict {
+/**
+ * Usernames as sites compare them. `Alice@Gmail.com` typed where
+ * `alice@gmail.com` was saved is the same account: told apart, it would be
+ * saved a second time beside the first.
+ */
+export function sameUsername(a: string, b: string): boolean {
+  const fold = (value: string) => value.normalize('NFC').trim().toLowerCase();
+  return fold(a) === fold(b);
+}
+
+/**
+ * `current`: what a change-password form held as the password until now. It
+ * names the login being changed when the form names no username.
+ */
+export function judgeCapture(data: VaultData, page: Site, username: string, password: string, current = ''): CaptureVerdict {
   if (data.neverSave.includes(siteName(page))) return { kind: 'neverSave' };
-  const matches = loginsForSite(data, page);
-  const sameUser = matches.find(({ item }) => item.username === username);
-  if (sameUser) return sameUser.item.password === password ? { kind: 'known' } : { kind: 'update', item: sameUser.item };
-  // A form that sends only a password — a second step, a re-auth prompt —
-  // most likely belongs to the one login this site has.
-  if (!username) {
-    if (matches.some(({ item }) => item.password === password)) return { kind: 'known' };
-    if (matches.length === 1) return { kind: 'update', item: matches[0]!.item };
+  const matches = loginsForSite(data, page).map(({ item }) => item);
+  if (username) {
+    const same = matches.filter((item) => sameUsername(item.username, username));
+    if (same.some((item) => item.password === password)) return { kind: 'known' };
+    const item = same.find((candidate) => candidate.username === username) ?? same[0];
+    if (item) return { kind: 'update', item };
+    // Saved before without its username — from a password-only step — and
+    // this is that account: a second login for it would be a duplicate.
+    if (matches.some((candidate) => !candidate.username && candidate.password === password)) return { kind: 'known' };
+    return { kind: 'new' };
   }
-  return { kind: 'new' };
+  // A form that sends only a password: a re-auth prompt, or a second step
+  // whose username was asked for on the page before.
+  if (matches.some((item) => item.password === password)) return { kind: 'known' };
+  const changed = current ? matches.find((item) => item.password === current) : undefined;
+  if (changed) return { kind: 'update', item: changed };
+  if (matches.length === 1) return { kind: 'update', item: matches[0]! };
+  return matches.length ? { kind: 'unsure' } : { kind: 'new' };
 }
 
 /** Case- and accent-blind search over what a person would remember of a login. */

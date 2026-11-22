@@ -13,6 +13,24 @@ import { Button, cx } from './primitives.js';
 
 export const PlaceContext = createContext<VaultPlace | null>(null);
 
+/**
+ * Whether the place shown is a shared vault this account may only view: its
+ * items are filled and copied from, never changed. The service worker refuses
+ * a change there whatever a page sends; the screens only leave out what it
+ * would refuse.
+ */
+export const ViewOnlyContext = createContext(false);
+
+/** Whether this account runs the family whose shared vault is shown, or the vault's own is: an organiser alone destroys what a family keeps. */
+export function organiserAt(data: VaultData, place: VaultPlace | null): boolean {
+  return !place || data.families.find((family) => family.orgId === place.orgId)?.role === 'owner';
+}
+
+export function viewOnlyAt(data: VaultData, place: VaultPlace | null): boolean {
+  if (!place) return false;
+  return data.families.find((family) => family.orgId === place.orgId)?.vaults.find((vault) => vault.id === place.vaultId)?.viewOnly === true;
+}
+
 /** A change to the items of the place shown. */
 export function useChange(): (change: ItemMutation) => Promise<void> {
   const place = useContext(PlaceContext);
@@ -24,6 +42,7 @@ export interface SharedVault {
   name: string;
   family: string;
   organiser: boolean;
+  viewOnly: boolean;
 }
 
 /**
@@ -33,7 +52,7 @@ export interface SharedVault {
  */
 export function sharedVaults(data: VaultData): SharedVault[] {
   return data.families.flatMap((family) =>
-    family.vaults.map((vault) => ({ place: { orgId: family.orgId, vaultId: vault.id }, name: vault.name, family: family.name, organiser: family.role === 'owner' })),
+    family.vaults.map((vault) => ({ place: { orgId: family.orgId, vaultId: vault.id }, name: vault.name, family: family.name, organiser: family.role === 'owner', viewOnly: vault.viewOnly === true })),
   );
 }
 
@@ -93,11 +112,13 @@ export function MoveToFamily({ id, shared, onMoved }: { id: string; shared: Shar
   const t = useT();
   const [to, setTo] = useState<SharedVault | null>(null);
   const { busy, error, run } = useAction();
-  if (!shared.length) return null;
+  // Nothing moves into a vault this account may only view.
+  const into = shared.filter((vault) => !vault.viewOnly);
+  if (!into.length) return null;
   if (!to) {
     return (
       <span className="flex flex-wrap gap-1">
-        {shared.map((vault) => (
+        {into.map((vault) => (
           <Button key={`${vault.place.orgId}:${vault.place.vaultId}`} size="sm" variant="ghost" onClick={() => setTo(vault)}>
             <UsersIcon className="h-4 w-4" /> {t('move.to', { vault: vault.name })}
           </Button>

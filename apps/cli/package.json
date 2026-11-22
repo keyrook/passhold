@@ -1,0 +1,23 @@
+{
+  "name": "@passhold/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Passhold in a terminal: secrets by passhold:// references in every vault, the family's shared ones among them, and an SSH agent.",
+  "license": "GPL-3.0-or-later",
+  "bin": {
+    "passhold": "dist/passhold.mjs"
+  },
+  "scripts": {
+    "build": "vite build",
+    "build:sea": "vite build --mode sea",
+    "release": "node scripts/release.mjs",
+    "start": "node dist/passhold.mjs"
+  },
+  "dependencies": {
+    "@passhold/core": "*"
+  },
+  "devDependencies": {
+    "postject": "1.0.0-alpha.6"
+  }
+}

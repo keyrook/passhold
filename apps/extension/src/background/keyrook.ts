@@ -27,6 +27,8 @@ import type {
   SecondStepRequired,
 } from '@keyrook/account';
 import type { AccountKdfParams, RemoteRecord, SealedBox, SignInProvider } from '@passhold/core';
+import { accountDataAllowed, isFirefox } from '../lib/platform.js';
+import { spendOnce } from '../lib/refresh.js';
 
 export class KeyrookError extends Error {
   override readonly name = 'KeyrookError';
@@ -58,17 +60,22 @@ export const KEYROOK_ORIGIN = new URL(__KEYROOK_API__).origin;
  * them to update rather than let them change an account they cannot keep up
  * with. Which product a session is, it takes from the extension's origin.
  */
-const fetcher = namedClient(
-  (input, init) =>
-    fetch(input, {
+// Every session the worker opens shares this: a refresh token it spent is never sent again (lib/refresh.ts).
+const fetcher = spendOnce(namedClient(
+  async (input, init) => {
+    // Firefox: nothing is sent before its owner has let the account's data go
+    // (lib/platform.ts). The pages ask first; this is the wall behind them.
+    if (!(await accountDataAllowed())) throw new TypeError('The account’s data may not be sent.');
+    return fetch(input, {
       ...init,
       // A server that never answers must not hold a sync, and the vault's queue, forever.
       signal: AbortSignal.timeout(TIMEOUT),
       credentials: 'omit',
       cache: 'no-store',
-    }),
+    });
+  },
   `passhold/${chrome.runtime.getManifest().version}`,
-);
+));
 
 /** The server, as @keyrook/account's flows reach it before there is a session. */
 export const SERVER: AccountServer = { baseUrl: __KEYROOK_API__, fetcher };
@@ -281,7 +288,10 @@ export const push = (accessToken: string, records: RemoteRecord[], baseServerRev
  * server's that messages Passhold (`return=message`).
  */
 export function providerStartUrl(provider: SignInProvider, challenge: string, state: string, purpose: 'signin' | 'reauth' = 'signin'): string {
-  const query = new URLSearchParams({ ext: chrome.runtime.id, challenge, state, return: 'message', purpose });
+  // Firefox lets no page message an extension: the server redirects to the
+  // address made from the add-on's id, which the browser's sign-in window is
+  // waiting at (ui: ProviderSignIn).
+  const query = new URLSearchParams({ ext: chrome.runtime.id, challenge, state, ...(isFirefox() ? {} : { return: 'message' }), purpose });
   return `${__KEYROOK_API__}/oauth/${provider}/start?${query}`;
 }
 

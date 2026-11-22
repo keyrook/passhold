@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "./.tsbuild",
+    "rootDir": "../..",
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@passhold/core": ["../../packages/core/src/index.ts"],
+      "@keyrook/brand": ["../../vendor/keyrook-brand/src/index.ts"],
+      "@keyrook/account": ["../../vendor/keyrook-account/src/index.ts"]
+    },
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "e2e/**/*.ts", "scripts/**/*.ts", "playwright.config.ts", "vite.config.ts", "headers.d.mts", "env.d.ts"],
+  "references": [{ "path": "../../packages/core" }, { "path": "../extension" }]
+}

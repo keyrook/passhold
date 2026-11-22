@@ -14,6 +14,10 @@ import { signsAsPasskey } from '../webauthn/authenticator.js';
 import { rpIdKeepable } from '../webauthn/request.js';
 import { collector, json, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, record, str, whole, type ImportResult } from './collect.js';
 import { importCsv } from './csv.js';
+import { apiKeyFrom, importBwsSecrets, isBwsList, keyField } from './apikeys.js';
+import { serviceOfKey } from '../apikey.js';
+import { importOnePux } from './onepux.js';
+import { isZip } from './zip.js';
 
 /** Bitwarden's kinds of item, by number. Its others — SSH keys, bank accounts, licences, passports — Passhold keeps nothing of. */
 const LOGIN = 1;
@@ -127,16 +131,30 @@ export async function importBitwardenJson(input: string, vault: Pick<VaultData, 
         const urls = uris.map(normaliseUrl).filter((url): url is string => url !== null);
         if (passkey && !urls.length) urls.push(`https://${passkey.rpId}/`);
         // Nothing to sign in with, but words to keep: a note, its address its first line, as a CSV row like it is.
+        const hosts = urls.map((url) => new URL(url).host);
+        // Bitwarden has no kind for an API key: one is saved as a login whose password is the key, or with a hidden field holding it.
+        const held = !password ? keyField(fields) : null;
+        const asKey = passkey ? null : password && serviceOfKey(password, username) ? { key: password, rest: fields } : held ? { key: held.value, rest: fields.filter((field) => field !== held) } : null;
         if (!username && !password && !passkey) {
           const words = [uris[0]?.trim() ?? '', notes].filter(Boolean).join('\n');
           // Its fields are something to keep too: a note of them, rather than nothing.
-          into.keep(fields.length ? { kind: 'note', title, text: words, fields } : null, title, words, folder);
-        } else into.login({ title, username, password, urls, notes, favorite, folder, fields }, passkey);
+          const at = into.keep(fields.length ? { kind: 'note', title, text: words, fields } : null, title, words, folder);
+          if (asKey) into.offerKey('wallet', at, apiKeyFrom({ title, key: asKey.key, hosts, notes, favorite, folder, fields: asKey.rest }));
+        } else {
+          const at = into.login({ title, username, password, urls, notes, favorite, folder, fields }, passkey);
+          if (asKey) into.offerKey('login', at, apiKeyFrom({ title, key: asKey.key, keyId: username, hosts, notes, favorite, folder, fields: asKey.rest }));
+        }
         break;
       }
-      case NOTE:
-        into.keep({ kind: 'note', title, text: notes, favorite, folder, fields }, title, notes);
+      case NOTE: {
+        const at = into.keep({ kind: 'note', title, text: notes, favorite, folder, fields }, title, notes);
+        // A key kept as a note: in a hidden field, or as the note's one line.
+        const held = keyField(fields);
+        const line = notes.trim();
+        const asKey = held ? { key: held.value, rest: fields.filter((field) => field !== held), notes } : !/\s/.test(line) && serviceOfKey(line) ? { key: line, rest: fields, notes: '' } : null;
+        if (asKey) into.offerKey('wallet', at, apiKeyFrom({ title, key: asKey.key, notes: asKey.notes, favorite, folder, fields: asKey.rest }));
         break;
+      }
       case CARD: {
         const card = record(item.card) ?? {};
         into.keep(
@@ -191,7 +209,25 @@ export async function importBitwardenJson(input: string, vault: Pick<VaultData, 
   return into.done('bitwarden');
 }
 
-/** A file from another manager, told apart by what it holds: Bitwarden's JSON, or a CSV file of any of them. */
+/**
+ * A file from another manager, told apart by what it holds: Bitwarden's
+ * JSON, Bitwarden Secrets Manager's list of secrets, or a CSV file of any of
+ * them.
+ */
 export async function importFile(input: string, vault: Pick<VaultData, 'items' | 'wallet'> = { items: [], wallet: [] }): Promise<ImportResult> {
+  if (/^\uFEFF?\s*\[/.test(input)) {
+    if (input.length > MAX_IMPORT_BYTES) throw new PassholdError('importTooLarge');
+    const listed = json(input.charCodeAt(0) === 0xfeff ? input.slice(1) : input);
+    if (!isBwsList(listed)) throw new PassholdError('importUnknownFormat');
+    return importBwsSecrets(listed, vault);
+  }
   return /^\uFEFF?\s*\{/.test(input) ? importBitwardenJson(input, vault) : importCsv(input, vault);
+}
+
+/** A file as its bytes: 1Password's `.1pux`, which is a ZIP archive, or any file `importFile` reads as text. */
+export async function importFileBytes(bytes: Uint8Array, vault: Pick<VaultData, 'items' | 'wallet'> = { items: [], wallet: [] }): Promise<ImportResult> {
+  // A .1pux carries its items' files beside its items; only its items are read, and they are held to the same bound as any file.
+  if (isZip(bytes)) return importOnePux(bytes, vault);
+  if (bytes.length > MAX_IMPORT_BYTES) throw new PassholdError('importTooLarge');
+  return importFile(new TextDecoder().decode(bytes), vault);
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { deviceAvailable } from '../ui/device.js';
 import { setPasswordName } from '../ui/passwordName.js';
+import { PlanContext } from '../ui/plan.js';
 import { useVault } from '../ui/hooks.js';
 import { RecoveryKeyScreen } from './RecoveryKeyScreen.js';
 import { WelcomeScreen } from './WelcomeScreen.js';
@@ -34,6 +35,10 @@ export function App() {
     case 'locked':
       return <UnlockScreen secret={status.secret} pin={status.pin} device={status.device} keys={status.keys} ask />;
     case 'unlocked':
-      return <VaultScreen data={status.data} account={status.account} />;
+      return (
+        <PlanContext.Provider value={status.plan}>
+          <VaultScreen data={status.data} account={status.account} />
+        </PlanContext.Provider>
+      );
   }
 }

@@ -20,7 +20,7 @@ export default defineConfig({
   build: {
     outDir: process.env.PASSHOLD_DIST ?? 'dist',
     emptyOutDir: false,
-    target: 'chrome120',
+    target: process.env.PASSHOLD_TARGET ?? 'chrome120',
     sourcemap: false,
     lib: {
       entry: resolve(import.meta.dirname, entry === 'content' ? 'src/content/index.ts' : `src/content/${entry}.ts`),

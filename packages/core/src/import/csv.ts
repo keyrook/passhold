@@ -11,9 +11,10 @@ import { PassholdError } from '../errors.js';
 import { normaliseUrl } from '../match.js';
 import type { AddressDraft, CardDraft, CustomField, LoginItem, VaultData, WalletDraft } from '../vault/model.js';
 import { countryCode } from '../vault/wallet.js';
-import { collector, json, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, record, str, whole, type ImportFormat, type ImportResult } from './collect.js';
+import { chooseKeys, collector, json, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, record, str, whole, type ImportFormat, type ImportResult, type KeyCandidate } from './collect.js';
+import { isApiKeysHeader, readApiKeysCsv } from './apikeys.js';
 
-export { MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, type ImportFormat, type ImportResult };
+export { chooseKeys, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS, type ImportFormat, type ImportResult, type KeyCandidate };
 
 /** RFC 4180, plus what real exports do: a BOM, bare LF line ends, a missing final newline. */
 export function parseCsv(input: string): string[][] {
@@ -324,6 +325,11 @@ export function importCsv(input: string, vault: Pick<VaultData, 'items' | 'walle
   const [headerRow, ...body] = rows;
   if (!headerRow || !body.length) throw new PassholdError('importEmpty');
   const header = headerRow.map((name) => name.trim().toLowerCase());
+  // Passhold's own CSV of API keys: its columns are no login's.
+  if (isApiKeysHeader(header)) {
+    if (body.length > MAX_IMPORT_ROWS) throw new PassholdError('importTooLarge');
+    return readApiKeysCsv(header, body, vault);
+  }
 
   const at = Object.fromEntries(
     Object.entries(COLUMNS).map(([key, names]) => [key, column(header, names)]),

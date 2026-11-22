@@ -12,6 +12,18 @@
 import {
   acceptPushed,
   addLogin,
+  attachFile,
+  deleteStoredFile,
+  detachFile,
+  fileCollection,
+  filesDeleted,
+  findAttachment,
+  forgetFiles,
+  MAX_SEALED_FILE,
+  SEND_FILES,
+  PassholdError,
+  withoutFileKeys,
+  type Attachment,
   judgeSentAddress,
   judgeSentCard,
   saveSent,
@@ -34,6 +46,7 @@ import {
   splitName,
   trashWalletItem,
   updateWalletItem,
+  restoreWalletVersion,
   walletOf,
   walletTitle,
   type AddressItem,
@@ -46,7 +59,9 @@ import {
   allSent,
   resendAll,
   deriveAccountKeys,
+  exportApiKeysCsv,
   exportCsv,
+  fillableWalletItem,
   accountKitProof,
   formatAccountKitKey,
   isAccountKitKey,
@@ -116,6 +131,7 @@ import {
   trashLogin,
   unlockVault,
   updateLogin,
+  restoreLoginVersion,
   updateSettings,
   verifyMasterPassword,
   fromBase64,
@@ -157,8 +173,34 @@ import {
   type Items,
   type UnreadableRecord,
   type VaultPlace,
+  addLinkedCode,
+  codeFitsLogin,
+  emergencyView,
+  exposedLogins,
+  handOverEmergency,
+  loginCopy,
+  readEmergency,
+  readLinkedCodes,
+  readTotpSetup,
+  showCode,
+  trustEmergency,
+  websitesOf,
+  planAllows,
+  planFromBilling,
+  plansOfferedFromBilling,
+  type CopyLabels,
+  type LinkedCodes,
+  applyMutation as applyChange,
+  pageView,
+  syncOwnRecords,
+  syncFamilies as syncFamilyRound,
+  type VaultTurn,
+  type Plan,
 } from '@passhold/core';
 import {
+  AUTHENTICATOR,
+  createSend,
+  openLink,
   createAccount as createKeyrookAccount,
   createAccountRoot,
   createProviderAccount as createProvider,
@@ -178,6 +220,7 @@ import {
   signInWithPasskey,
   startAccountOver,
   SyncHttpError,
+  sealedFileSize,
   familyCompareCode,
   openFamily,
   pullFamily,
@@ -195,6 +238,8 @@ import {
   type HttpSyncAdapter,
   type OpenedProductKey,
   type ProductKey,
+  type SendCreated,
+  type SendRequest,
 } from '@keyrook/account';
 import { AppError, describeError, fail } from '../i18n/errors.js';
 import type { MessageKey } from '../i18n/locales/en.js';
@@ -203,6 +248,7 @@ import {
   type SecondStepAnswer,
   isContentSender,
   isTrustedSender,
+  ownOrigin,
   VAULT_CHANGED,
   type ArchiveView,
   type ContentHello,
@@ -212,7 +258,6 @@ import {
   type ProviderView,
   type Envelope,
   type FieldKind,
-  type ItemMutation,
   type MenuView,
   type Mutation,
   type PageInfo,
@@ -224,19 +269,28 @@ import {
   type PromptOutcome,
   type Proof,
   type Request,
+  type CodesView,
+  type SentView,
+  type EmergencyRead,
   type SyncResult,
   type RestoreResult,
   type SecurityKey,
   type ToContent,
   type VaultStatus,
 } from '../lib/messaging.js';
-import { deviceUnsupported } from '../lib/name.js';
+import { browserName, deviceLabel, deviceUnsupported, systemOf } from '../lib/name.js';
 import { answered as ratingAnswered, loadRating, recordFill, shouldAsk, snooze as snoozeRating, updateRating } from '../lib/rating.js';
+import { allows, planOf, planView } from '../lib/plan.js';
 import { createSerialiser } from '../lib/serial.js';
 import {
   clearDevice,
   clearPin,
   clearSession,
+  loadEmergency,
+  loadLinked,
+  saveEmergency,
+  saveLinked,
+  type HeldCodes,
   clearUnlocks,
   clearVaultFile,
   loadDevice,
@@ -258,8 +312,8 @@ import {
   type LockPolicy,
   type Prefs,
 } from '../lib/storage.js';
-import { clearClipboardLater } from './clipboard.js';
-import { accountSentenceKey, sentenceKey } from './sentences.js';
+import { CLIPBOARD_ALARM, clearClipboardLater, clearClipboardNow } from './clipboard.js';
+import { accountFailure } from '../lib/failure.js';
 import {
   acceptPairing,
   accountKeys,
@@ -327,9 +381,17 @@ void chrome.storage.session.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' }
 // guess the master password against offline, and lets it write over the
 // vault or remove it. Chrome keeps the level across restarts; it is set at
 // every start all the same (e2e/renderer.spec.ts tries both ways in).
-chrome.storage.local
-  .setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
-  .catch((error: unknown) => console.error('Local storage could not be closed to content scripts.', error));
+//
+// Firefox has no such level to set (and none for session storage, which it
+// keeps from content scripts by itself). There the vault and the copies of
+// its key are kept in the extension's own database instead (`disk()`,
+// lib/storage.ts), and local storage holds only the theme and when to ask for
+// a rating.
+if (chrome.storage.local.setAccessLevel) {
+  chrome.storage.local
+    .setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
+    .catch((error: unknown) => console.error('Local storage could not be closed to content scripts.', error));
+}
 
 // --- the vault ------------------------------------------------------------------
 
@@ -410,69 +472,8 @@ function change(apply: (data: VaultData) => VaultData): Promise<UnlockedVault> {
   });
 }
 
-function applyMutation(data: VaultData, mutation: Mutation): VaultData {
-  switch (mutation.op) {
-    case 'import':
-      return mutation.wallet.reduce((next, draft) => addWalletItem(next, draft).data, importLogins(data, mutation.logins, mutation.passkeys));
-    case 'folder/rename':
-      return renameFolder(data, mutation.from, mutation.to);
-    case 'family/change':
-      return applyFamilyChange(data, mutation.place, mutation.change);
-    case 'family/move':
-      return moveToFamily(data, mutation.id, mutation.place).data;
-    case 'family/departureRead':
-      return readDeparture(data, mutation.orgId, mutation.accountId);
-    case 'settings/update':
-      return updateSettings(data, mutation.patch);
-    case 'neverSave/remove':
-      return removeNeverSave(data, mutation.site);
-    case 'recovery/saved':
-      return setRecoveryKeyPending(data, false);
-    case 'account/kitSaved':
-      return data.account?.kit ? { ...data, account: { ...data.account, kit: { ...data.account.kit, pending: false } } } : data;
-    default:
-      return applyItemMutation(data, mutation);
-  }
-}
-
-/** A change to the items of one place, the vault's own or a shared vault in it: the same rules for both. */
-function applyItemMutation<T extends Items>(data: T, mutation: ItemMutation): T {
-  switch (mutation.op) {
-    case 'login/add':
-      return addLogin(data, mutation.draft).data;
-    case 'login/update':
-      return updateLogin(data, mutation.id, mutation.draft);
-    case 'login/favorite':
-      return setFavorite(data, mutation.id, mutation.favorite);
-    case 'login/trash':
-      return trashLogin(data, mutation.id);
-    case 'login/restore':
-      return restoreLogin(data, mutation.id);
-    case 'login/purge':
-      return purgeLogin(data, mutation.id);
-    case 'wallet/add':
-      return addWalletItem(data, mutation.draft).data;
-    case 'wallet/update':
-      return updateWalletItem(data, mutation.id, mutation.draft);
-    case 'wallet/favorite':
-      return setWalletFavorite(data, mutation.id, mutation.favorite);
-    case 'wallet/trash':
-      return trashWalletItem(data, mutation.id);
-    case 'wallet/restore':
-      return restoreWalletItem(data, mutation.id);
-    case 'wallet/purge':
-      return purgeWalletItem(data, mutation.id);
-    case 'trash/empty':
-      return emptyTrash(data);
-  }
-}
-
-/** In a shared vault, destroying is an organiser's: its trash emptied, or one item out of it. */
-function applyFamilyChange(data: VaultData, place: VaultPlace, change: ItemMutation): VaultData {
-  if (change.op === 'trash/empty') return emptyFamilyTrash(data, place);
-  if (change.op === 'login/purge' || change.op === 'wallet/purge') return purgeFromFamily(data, place, change.id);
-  return inFamilyVault(data, place, (vault) => applyItemMutation(vault, change));
-}
+/** A page's change, with the plan the server last named for this vault's account: the rules are the core's, shared with the web vault. */
+const applyMutation = (data: VaultData, mutation: Mutation): VaultData => applyChange(data, mutation, planOf(data));
 
 async function lock(): Promise<void> {
   locks++;
@@ -504,7 +505,6 @@ async function opened(vault: UnlockedVault, pin: 'renew' | 'keep' = 'renew'): Pr
   return unlockedView(vault, unlock && credentialOf(unlock), (await loadKeys()).map(keyOf));
 }
 
-const withoutPrivateKey = (item: LoginItem): LoginItem => (item.passkey ? { ...item, passkey: { ...item.passkey, privateKey: '' } } : item);
 
 /**
  * The open vault as pages see it. Pages hold every login already; they are
@@ -518,19 +518,8 @@ function unlockedView(vault: UnlockedVault, device: DeviceCredential | null, key
     state: 'unlocked',
     secret: secretOf(vault.file),
     passwordName: passwordNameOf(vault.file),
-    // Websites' passkeys without their private keys: only the service worker signs.
-    data: {
-      ...vault.data,
-      items: vault.data.items.map(withoutPrivateKey),
-      recoveryKey: null,
-      account: null,
-      // A shared vault's passkeys likewise; its pin and what was sent of it are the worker's business.
-      families: vault.data.families.map((family) => ({
-        ...family,
-        pin: null,
-        vaults: family.vaults.map((entry) => ({ ...entry, known: {}, items: entry.items.map(withoutPrivateKey) })),
-      })),
-    },
+    // Websites' passkeys without their private keys, files without theirs: the core's rule, shared with the web vault.
+    data: pageView(vault.data),
     device,
     keys,
     account: link && {
@@ -549,6 +538,7 @@ function unlockedView(vault: UnlockedVault, device: DeviceCredential | null, key
       passwordless: link.passwordless,
       passkey: link.passkey !== null,
     },
+    plan: planView(vault.data),
   };
 }
 
@@ -611,10 +601,10 @@ function itemOrFail(data: VaultData, id: string): LoginItem {
   return item;
 }
 
-/** A live card or address, of the kind the field it is for takes: never a note, which is filled nowhere. */
+/** A live card or address, of the kind the field it is for takes: never a note, an SSH key or an API key, which are filled nowhere (`fillableWalletItem`). */
 function walletItemOrFail(data: VaultData, id: string, kind: 'card' | 'address'): CardItem | AddressItem {
-  const item = data.wallet.find((entry) => entry.id === id && entry.kind === kind && entry.deletedAt === null);
-  if (!item || item.kind === 'note') fail('error.itemNotFound');
+  const item = fillableWalletItem(data, id, kind);
+  if (!item) fail('error.itemNotFound');
   return item;
 }
 
@@ -780,6 +770,17 @@ interface PendingSave {
   /** A sign-in sent; empty for a checkout. */
   username: string;
   password: string;
+  /** In a form that changes a password, the one it held until now: it names which login is changed. */
+  current?: string;
+  /** The document that sent it, and its frame: what it became of is that document's to say, or the next one's there. */
+  documentId?: string;
+  frameId?: number;
+  /**
+   * The sign-in went through: its form went away, or the page moved on to one
+   * with none. Until then nothing is offered — a sign-in sent with a mistyped
+   * password is not one to keep. A checkout is sure as sent.
+   */
+  sure: boolean;
   /** A checkout sent: its card and its address, checked as a typed one is; null for a sign-in. */
   card?: CardDraft | null;
   address?: AddressDraft | null;
@@ -791,6 +792,25 @@ interface PendingSave {
 const isCheckout = (entry: PendingSave) => Boolean(entry.card || entry.address);
 
 const pending = sessionTable<PendingSave>('ph.pending');
+
+/**
+ * A sign-in's first step, sent in a tab: the username a password-only page
+ * after it does not name. Kept for that page, on the same site, for a while.
+ */
+interface FirstStep {
+  tabId: number;
+  site: string;
+  username: string;
+  at: number;
+}
+
+const firstSteps = sessionTable<FirstStep>('ph.firstStep');
+const FIRST_STEP_TTL = 10 * 60_000;
+
+async function firstStepFor(tabId: number, site: string): Promise<string> {
+  const step = (await firstSteps.read())[String(tabId)];
+  return step && step.site === site && Date.now() - step.at < FIRST_STEP_TTL ? step.username : '';
+}
 
 /** Sign-ins still within their time. Expired ones are dropped the next time the table is written. */
 async function livePending(): Promise<PendingSave[]> {
@@ -804,12 +824,16 @@ async function pendingView(entry: PendingSave): Promise<PendingView | null> {
   if (!site) return null;
   if (isCheckout(entry)) return checkoutView(entry, siteName(site), vault?.data ?? null);
   let kind: 'new' | 'update' | null = null;
+  let username = entry.username;
   if (vault) {
-    const verdict = judgeCapture(vault.data, site, entry.username, entry.password);
-    if (verdict.kind === 'known' || verdict.kind === 'neverSave') return null;
+    const verdict = judgeCapture(vault.data, site, entry.username, entry.password, entry.current);
+    if (verdict.kind !== 'new' && verdict.kind !== 'update') return null;
     kind = verdict.kind;
+    // Which login the new password goes to, by the name it is saved under:
+    // never "a password for this site" when one particular login changes.
+    if (verdict.kind === 'update') username = verdict.item.username || verdict.item.title || entry.username;
   }
-  return { what: 'login', id: entry.id, site: siteName(site), username: entry.username, kind };
+  return { what: 'login', id: entry.id, site: siteName(site), username, kind };
 }
 
 /**
@@ -846,7 +870,7 @@ async function answerPending(entry: PendingSave, answer: 'save' | 'never' | 'dis
     if (!site) return data;
     if (isCheckout(entry)) return saveSent(data, { card: entry.card ?? null, address: entry.address ?? null });
     if (answer === 'never') return addNeverSave(data, siteName(site));
-    const verdict = judgeCapture(data, site, entry.username, entry.password);
+    const verdict = judgeCapture(data, site, entry.username, entry.password, entry.current);
     if (verdict.kind === 'update') {
       return updateLogin(data, verdict.item.id, { ...verdict.item, password: entry.password });
     }
@@ -859,12 +883,24 @@ async function answerPending(entry: PendingSave, answer: 'save' | 'never' | 'dis
   return 'saved';
 }
 
-/** Hold what a page sent for its prompt. One waiting per tab: the latest is the one that worked. */
+/**
+ * Hold what a page sent for its prompt. One waiting per tab: the latest is the
+ * one that worked. Offered at once only when sure; a sign-in waits to be.
+ */
 async function holdPending(entry: PendingSave): Promise<void> {
   await tableTurn(async () => {
     const live = (await livePending()).filter((candidate) => candidate.tabId !== entry.tabId);
     await pending.write(Object.fromEntries([...live, entry].map((candidate) => [candidate.id, candidate])));
   });
+  if (entry.sure) await showPromptIn(entry);
+  else {
+    // The page after it may have loaded, and asked, before this was held.
+    const frames = new Set([0, entry.frameId ?? 0]);
+    for (const frameId of frames) await chrome.tabs.sendMessage<ToContent>(entry.tabId, { type: 'ph/askPrompt' }, { frameId }).catch(() => undefined);
+  }
+}
+
+async function showPromptIn(entry: PendingSave): Promise<void> {
   await chrome.tabs.sendMessage<ToContent>(entry.tabId, { type: 'ph/showPrompt', token: entry.token }, { frameId: 0 }).catch(() => undefined);
 }
 
@@ -1158,6 +1194,25 @@ async function answerPasskey(token: string, answer: PasskeyAnswer, id: string | 
 
 // --- the Keyrook account ------------------------------------------------------------------
 
+/**
+ * The account's page, where Passhold offers to save nothing. Its password is
+ * the one Passhold opens with ("One password, never two"), and its forms ask
+ * for it again to confirm a change — a family made, someone confirmed —
+ * beside fields that are no username: an invitation's address, a family's
+ * name. Taken for sign-ins, they were offered to be saved under those. Known
+ * by Chrome's stamp on the frame's messages, never by what a page says.
+ */
+const ACCOUNT_PAGE_ORIGIN = new URL(__KEYROOK_ACCOUNT_PAGE__).origin;
+
+/**
+ * Passhold's web vault, where no script of Passhold's runs (the manifest
+ * keeps all three off it): should a frame of that origin speak all the same,
+ * it is answered nothing — no list, no fill, no save, and no passkey request
+ * taken from it, as its passkeys are the account's. Known by Chrome's stamp
+ * on the frame's messages, never by what a page says.
+ */
+const VAULT_PAGE_ORIGIN = new URL(__KEYROOK_VAULT_PAGE__).origin;
+
 const SYNC_ALARM = 'ph.sync';
 let syncRun: Promise<SyncResult> | null = null;
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1170,57 +1225,60 @@ function scheduleSync(delay = 3_000): void {
 
 /** One sync at a time: two would spend the same refresh token, and the server ends a session for that. */
 function syncNow(): Promise<SyncResult> {
-  syncRun ??= runSync().finally(() => {
-    syncRun = null;
-  });
+  syncRun ??= runSync()
+    .then(async (result) => {
+      // Inside the sync, not after it: nothing else the person does starts while these still use the session.
+      await besideTheVault();
+      return result;
+    })
+    .finally(() => {
+      syncRun = null;
+    });
   return syncRun;
 }
 
-function deviceName(): string {
-  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || 'Chrome';
-  return `Passhold · ${platform}`;
+/**
+ * What a sync reads beside the vault, on the one session and side by side,
+ * each quietly: a plan without it, a server that does not offer it or cannot
+ * answer, refuses, and nothing is lost.
+ */
+async function besideTheVault(): Promise<void> {
+  await withProductKey(
+    async (api, productKey) => {
+      await Promise.allSettled([
+        // Passhold's own box of the contact key, its key handed to each contact compared here, and what Settings shows.
+        (async () => {
+          await handOverEmergency(api, productKey);
+          await saveEmergency({ accountId: productKey.accountId, view: await emergencyView(api, productKey) });
+        })(),
+        // The plan the server names now, and whether it sells plans; one it cannot
+        // name leaves the last answer standing, and one with no plans to read —
+        // a server from before billing — sells none.
+        (async () => {
+          const billing = await api.billing().catch((error: unknown) => {
+            if (error instanceof SyncHttpError && error.status === 404) return null;
+            throw error;
+          });
+          await keepPlan(productKey.accountId, billing ? planFromBilling(billing) : undefined, billing ? plansOfferedFromBilling(billing) : false);
+        })(),
+        // And the link's codes, read now so that opening a login asks the server nothing.
+        (async () => keepLinked(productKey.accountId, await readLinkedCodes(api, productKey)))(),
+        // Files no item names any more, now that the records that named them have gone up; and uploads a page gave up on.
+        deleteLeftFiles(api),
+      ]);
+    },
+    { quiet: true },
+  ).catch(() => undefined);
+  // What these keep — emergency access, the link's codes — is in session
+  // storage, not the vault, so no commit tells the pages: this does, or an open
+  // Settings would still show what it read before the sync.
+  broadcast();
 }
 
-/** A refusal from the server or from the account's code, in a key a page can say. */
-function accountFailure(error: unknown): never {
-  if (error instanceof AppError || isPassholdError(error)) throw error;
-  // Passhold's own calls and @keyrook/account's flows refuse alike: a status, the server's code, its sentence.
-  const refusal =
-    error instanceof KeyrookError
-      ? { status: error.status, code: error.code, sentence: error.sentence, retryAfter: error.retryAfter }
-      : error instanceof SyncHttpError
-        ? { status: error.status, code: error.code, sentence: error.message, retryAfter: undefined }
-        : null;
-  if (refusal) {
-    if (refusal.code === 'network') fail('error.accountOffline');
-    // Removed from the account, this browser is signed out as by any other end of its session; what
-    // the account held goes only where the proof checks out (`signedOutData`).
-    if (refusal.code === 'signed_out' || refusal.code === 'device_removed') fail('error.accountSignedOut');
-    // The server's own sentence first, where it says more than its code.
-    const said = sentenceKey(refusal.sentence);
-    const wait = Math.max(1, Math.ceil(refusal.retryAfter ?? (Number(said?.filled) || 60)));
-    if (said?.key === 'error.accountBusy' || said?.key === 'error.accountCodeWait') fail(said.key, { count: wait });
-    if (said?.key === 'error.startOverTooOften' || said?.key === 'error.startOverWaiting') fail(said.key, { day: said.filled ?? '' });
-    if (said?.key) fail(said.key);
-    // A refresh the server refused: the session is gone.
-    if (refusal.status === 401 && error instanceof SyncHttpError && refusal.code === 'unauthorized') fail('error.accountSignedOut');
-    if (refusal.code === 'invalid_credentials') fail('error.accountWrong');
-    if (refusal.code === 'rate_limited') fail('error.accountBusy', { count: wait });
-    if (refusal.code === 'invalid_code') fail('error.accountCode');
-    if (refusal.code === 'forbidden') fail('error.accountPasswordWrong');
-    if (refusal.code === 'stale_revision') fail('error.accountKitRace');
-    if (refusal.code === 'email_taken') fail('error.providerEmailTaken');
-    if (refusal.code === 'not_found') fail('error.pairingEnded');
-    if (refusal.code === 'unavailable') fail('error.accountMail');
-    fail('error.accountFailed');
-  }
-  if (error instanceof Error) {
-    // A wrap that would not open: the password or the key was not the account's.
-    if (error.name === 'DecryptionError') fail('error.accountKeyWrong');
-    const said = accountSentenceKey(error.message);
-    if (said) fail(said);
-  }
-  fail('error.accountFailed');
+/** How the account's list of devices names this browser. Firefox has no `userAgentData`: its system is read from the user agent. */
+function deviceName(): string {
+  const hint = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform;
+  return deviceLabel(browserName(), systemOf(hint, navigator.userAgent));
 }
 
 /**
@@ -1279,11 +1337,6 @@ const addressOf = (raw: string) => String(raw).trim().toLowerCase().slice(0, 320
  * address the server could have taken, with no control or format character —
  * a direction override would turn what follows it around on the page.
  */
-function syncedAddress(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const address = addressOf(value);
-  return /^[^\s@\p{Cc}\p{Cf}]+@[^\s@\p{Cc}\p{Cf}]+$/u.test(address) ? address : null;
-}
 
 /** The session as signed in, with the tokens it holds now. */
 function answered(answer: Session, tokens: Tokens | null): Session {
@@ -1348,6 +1401,9 @@ async function settled(
 ): Promise<{ product: ProductKey; previousKey: CryptoKey | null }> {
   if (opened.status === 'open' && opened.mustReplace) {
     const replaced = await replaceProductKey(api, opened.productKey);
+    // The link's key, sealed again under the new key while the one before still opens it; with no link, or a plan
+    // that does not hold one, there is nothing to seal.
+    await openLink(api, replaced.productKey, AUTHENTICATOR, replaced.previousKey ?? undefined).catch(() => undefined);
     return { product: replaced.productKey, previousKey: replaced.previousKey };
   }
   if (opened.status === 'open' || opened.status === 'joined') return { product: opened.productKey, previousKey: null };
@@ -2782,7 +2838,12 @@ async function checkKit(rawKey: string): Promise<void> {
  * in to: the tokens it rotated to are kept, and a session the server ended
  * leaves the vault signed out — removed, where a proof says so.
  */
-async function withApi<T>(run: (api: HttpSyncAdapter) => Promise<T>): Promise<T> {
+/**
+ * `quiet`: for what runs on its own after a sync. A session the server
+ * refused is left for the next sync to find, as it finds it now; only tokens
+ * the server renewed are kept, since the ones before no longer work.
+ */
+async function withApi<T>(run: (api: HttpSyncAdapter) => Promise<T>, { quiet = false } = {}): Promise<T> {
   const link = (await requireUnlocked()).data.account;
   if (!link?.tokens) fail('error.accountNone');
   const session = connect(link.tokens);
@@ -2794,7 +2855,7 @@ async function withApi<T>(run: (api: HttpSyncAdapter) => Promise<T>): Promise<T>
     throw error;
   } finally {
     const tokens = session.tokens();
-    if (tokens?.refreshToken !== link.tokens.refreshToken) {
+    if (tokens?.refreshToken !== link.tokens.refreshToken && (tokens || !quiet)) {
       await serial(async () => {
         const open = await requireUnlocked();
         const account = open.data.account;
@@ -2803,6 +2864,289 @@ async function withApi<T>(run: (api: HttpSyncAdapter) => Promise<T>): Promise<T>
       });
     }
   }
+}
+
+// --- what the paid plans add -------------------------------------------------------------
+
+/**
+ * Passhold's key and a session, for the paid plans' flows; null with no
+ * account. The plan is the server's to say: a feature it does not hold is
+ * refused there, in a sentence placed in sentences.ts.
+ */
+async function withProductKey<T>(run: (api: HttpSyncAdapter, productKey: ProductKey) => Promise<T>, options: { quiet?: boolean } = {}): Promise<T | null> {
+  const open = await requireUnlocked();
+  const productKey = await productKeyOf(open.data.account);
+  if (!productKey || !open.data.account?.tokens) return null;
+  return withApi((api) => run(api, productKey), options).catch(accountFailure);
+}
+
+/**
+ * The plan the server named, and whether it sells plans, kept on the account
+ * link: what an edit keeps, and what the pages offer. `plan` undefined: none
+ * named, the last one kept.
+ */
+async function keepPlan(accountId: string, plan: Plan | undefined, offered: boolean): Promise<void> {
+  await serial(async () => {
+    const open = await requireUnlocked();
+    const account = open.data.account;
+    if (!account || account.accountId !== accountId) return;
+    const next = { ...account, ...(plan ? { plan } : {}), plansOffered: offered };
+    if (next.plan === account.plan && account.plansOffered === offered) return;
+    await commit(open, { ...open.data, account: next }, true);
+  });
+}
+
+/** The link's codes as they were read, kept for the pages to be shown from (`loadLinked`): the secrets never leave this worker. */
+async function keepLinked(accountId: string, codes: LinkedCodes): Promise<HeldCodes> {
+  const held: HeldCodes = { accountId, status: codes.status, codes: codes.status === 'open' ? codes.codes : [] };
+  await saveLinked(held);
+  return held;
+}
+
+/** The codes the last sync read, for this vault's account; null with none signed in. */
+async function linkedCodes(): Promise<HeldCodes | null> {
+  const account = (await requireUnlocked()).data.account;
+  if (!account?.tokens || !account.accountId) return null;
+  const held = await loadLinked();
+  return held?.accountId === account.accountId ? held : null;
+}
+
+/** A live login, in the vault's own or a shared vault. */
+function anyLogin(data: VaultData, id: string): LoginItem {
+  const login = [...data.items, ...data.families.flatMap((family) => family.vaults.flatMap((vault) => vault.items))].find((item) => item.id === id && item.deletedAt === null);
+  if (!login) fail('error.itemNotFound');
+  return login;
+}
+
+async function codesFor(login: LoginItem, codes: Pick<HeldCodes, 'status' | 'codes'> | null): Promise<CodesView> {
+  if (!codes) return { status: 'none' };
+  if (codes.status !== 'open') return { status: codes.status };
+  const now = Date.now();
+  return { status: 'open', codes: await Promise.all(codes.codes.filter((code) => codeFitsLogin(code.websites, login)).map((code) => showCode(code, now))) };
+}
+
+async function addCode(id: string, typed: string): Promise<CodesView> {
+  const login = anyLogin((await requireUnlocked()).data, id);
+  const setup = readTotpSetup(typed);
+  if (!setup) fail('error.notSetupKey');
+  // A code goes with a login by its site: one with no website would show nowhere.
+  const websites = websitesOf(login);
+  if (!websites.length) fail('error.codeNeedsSite');
+  const named = { ...setup, issuer: setup.issuer || login.title, label: setup.label || login.username };
+  const held = await withProductKey(async (api, productKey) => keepLinked(productKey.accountId, await addLinkedCode(api, productKey, named, websites)));
+  return codesFor(login, held);
+}
+
+const HOUR = 3_600_000;
+/** Where a Send's link opens: the page that reads Sends from this build's server. */
+const SEND_PAGE = __KEYROOK_SEND_PAGE__;
+
+/** A Send of typed text or of a login's copy. The link is the person's to keep: nothing here holds it after. */
+async function makeSend(request: Extract<Request, { type: 'send/create' }>): Promise<SentView> {
+  const vault = await requireUnlocked();
+  // Before the proof is asked for and anything is sealed: a plan without Send
+  // is told so here, not after its owner typed a password for nothing.
+  if (!allows(vault.data, 'send')) fail('error.notOnPlan');
+  checkSendTerms(request);
+  // A login's password leaves the vault in it, readable by whoever has the link: proof first, as for an export.
+  if (!request.proof) fail('error.wrongPassword');
+  await prove(vault, request.proof);
+  const body = { item: loginCopy(anyLogin(vault.data, String(request.itemId)), copyLabels(request.labels)) };
+  const password = typeof request.password === 'string' && request.password ? request.password : undefined;
+  const made = await withProductKey((api) => createSend(api, { body, opens: request.opens, lifetime: request.lifetime, ...(password ? { password } : {}), page: SEND_PAGE }));
+  if (!made) fail('error.accountNone');
+  return { url: made.url, opensLeft: made.send.opensLeft, expiresAt: made.send.expiresAt };
+}
+
+/** How often a link opens and how long it lasts, as the account allows: anything else is refused before the server is asked. */
+function checkSendTerms(terms: { opens: unknown; lifetime: unknown }): void {
+  if (!Number.isInteger(terms.opens) || (terms.opens as number) < 1 || (terms.opens as number) > 100) fail('error.sendFailed');
+  if (!Number.isInteger(terms.lifetime) || (terms.lifetime as number) < HOUR || (terms.lifetime as number) > 30 * 24 * HOUR) fail('error.sendFailed');
+}
+
+/**
+ * A Send of typed text and files, as the page that sealed them asks: the
+ * plan first, then the terms and each file's sealed size, then the server,
+ * on this vault's session. The page never holds the session; what it is
+ * handed is where to put each file, for minutes.
+ */
+async function beginSend(request: Extract<Request, { type: 'send/begin' }>): Promise<SendCreated> {
+  const vault = await requireUnlocked();
+  // Asked before the server is: Passhold must not learn the plan from a refusal.
+  if (!allows(vault.data, 'send')) fail('error.notOnPlan');
+  const given = (request.send ?? {}) as Partial<SendRequest>;
+  checkSendTerms({ opens: given.opens, lifetime: given.lifetime });
+  const files = Array.isArray(given.files) ? given.files : [];
+  if (files.length > SEND_FILES) fail('error.sendFailed');
+  for (const file of files) {
+    if (typeof file?.id !== 'string' || !FILE_ID.test(file.id) || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_SEALED_FILE) fail('error.fileTooLarge');
+  }
+  if (typeof given.id !== 'string' || typeof given.accessHash !== 'string' || typeof given.body !== 'object' || given.body === null) fail('error.sendFailed');
+  const made = await withProductKey((api) =>
+    api.createSend({ id: given.id!, body: given.body!, accessHash: given.accessHash!, opens: given.opens!, lifetime: given.lifetime!, files: files.map((file) => ({ id: file.id, size: file.size })) }),
+  );
+  if (!made) fail('error.accountNone');
+  // The kit's store answers on the server's own address, which it names from its root.
+  return { ...made, uploads: made.uploads.map((upload) => ({ ...upload, url: new URL(upload.url, SERVER.baseUrl).href })) };
+}
+
+/** The copy's field names, as the page that asked writes them in its language: words only, a line each. */
+function copyLabels(labels: unknown): CopyLabels {
+  const given = (labels ?? {}) as Partial<Record<keyof CopyLabels, unknown>>;
+  const word = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, 60) : fallback);
+  return { username: word(given.username, 'Username'), password: word(given.password, 'Password'), website: word(given.website, 'Website'), notes: word(given.notes, 'Notes') };
+}
+
+// --- files kept with items --------------------------------------------------------------
+
+/**
+ * An upload a page has begun, until its file is named in an item: which
+ * item, and what room it took. Kept in session storage, so a worker stopped
+ * midway still knows of it, and an upload whose page went away gives back its
+ * room (`dropAbandonedUploads`).
+ */
+interface Upload {
+  itemId: string;
+  place: VaultPlace | null;
+  /** Sealed, as the account was told. */
+  size: number;
+  at: number;
+  done: boolean;
+}
+
+const uploads = sessionTable<Upload>('ph.uploads');
+/** The store's address for an upload lasts minutes; one not named in an item an hour on never will be. */
+const UPLOAD_ABANDONED = 60 * 60_000;
+/** As the account names a file. */
+const FILE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** A live item of a vault this account may change, and where it is. */
+function itemForFiles(data: VaultData, itemId: string): { place: VaultPlace | null; item: LoginItem | WalletItem } {
+  const place = placeOf(data, itemId);
+  if (place === undefined) fail('error.itemNotFound');
+  const items = place ? familyVault(data, place).vault : data;
+  if (place && familyVault(data, place).vault.viewOnly) fail('error.viewOnly');
+  const item = [...items.items, ...items.wallet].find((entry) => entry.id === itemId);
+  if (!item || item.deletedAt !== null) fail('error.itemNotFound');
+  return { place, item };
+}
+
+/** The account's word for a file it does not keep, or a server's refusal, in a key a page can say. */
+function fileFailure(error: unknown): never {
+  if (error instanceof SyncHttpError && error.code === 'payload_too_large') throw new PassholdError('fileTooLarge');
+  return accountFailure(error);
+}
+
+async function beginUpload(itemId: string, id: string, size: number): Promise<{ url: string; expiresAt: number }> {
+  const { place } = itemForFiles((await requireUnlocked()).data, itemId);
+  if (typeof id !== 'string' || !FILE_ID.test(id)) fail('error.accountServerWrong');
+  if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_SEALED_FILE) throw new PassholdError('fileTooLarge');
+  const collection = fileCollection(place);
+  const begun = await withApi((api) => api.beginFile({ id, size, ...(collection ?? {}) })).catch(fileFailure);
+  await tableTurn(() => uploads.put(id, { itemId, place, size, at: Date.now(), done: false }));
+  // The kit's store answers on the server's own address, which it names from its root.
+  return { url: new URL(begun.url, SERVER.baseUrl).href, expiresAt: begun.expiresAt };
+}
+
+async function finishUpload(id: string): Promise<void> {
+  const upload = await uploads.get(id);
+  if (!upload) fail('error.fileFailed');
+  await withApi((api) => api.finishFile(id)).catch(fileFailure);
+  await tableTurn(async () => {
+    const now = await uploads.get(id);
+    if (now) await uploads.put(id, { ...now, done: true });
+  });
+}
+
+/** An upload given up: its room back at once. */
+async function cancelUpload(id: string): Promise<void> {
+  if (!(await uploads.get(id))) return;
+  try {
+    await withApi((api) => deleteStoredFile(api, id), { quiet: true });
+    await tableTurn(() => uploads.remove(id));
+  } catch {
+    // Locked or offline: kept, and deleted once its hour is up (`deleteLeftFiles`).
+  }
+}
+
+/**
+ * The file the store now holds, named in the item it was begun for, with the
+ * key it was sealed under. An item that has gone meanwhile — trashed, moved,
+ * deleted on another device — takes none, and the file goes from the account.
+ */
+async function attachUpload(request: Extract<Request, { type: 'files/attach' }>): Promise<void> {
+  const upload = await uploads.get(request.id);
+  if (!upload?.done) fail('error.fileFailed');
+  // What the page sealed is what the account was told of: a file the item names is the size it says.
+  if (!Number.isSafeInteger(request.size) || sealedFileSize(request.size) !== upload.size) fail('error.fileFailed');
+  const file: Attachment = { id: request.id, key: request.key, name: request.name, type: request.fileType, size: request.size, addedAt: Date.now() };
+  try {
+    await change((data) => {
+      const { place } = itemForFiles(data, upload.itemId);
+      if (!samePlace(place, upload.place)) fail('error.itemNotFound');
+      return place ? inFamilyVault(data, place, (vault) => attachFile(vault, upload.itemId, file)) : attachFile(data, upload.itemId, file);
+    });
+  } catch (error) {
+    await cancelUpload(request.id);
+    throw error;
+  }
+  await tableTurn(() => uploads.remove(request.id));
+}
+
+const samePlace = (a: VaultPlace | null, b: VaultPlace | null) => a?.orgId === b?.orgId && a?.vaultId === b?.vaultId;
+
+/** Where to read a file an item names, and the key for that one file alone: a page fetches it and opens it, and holds no other file's key. */
+async function openStoredFile(itemId: string, fileId: string): Promise<{ url: string; expiresAt: number; file: Attachment }> {
+  const { data } = await requireUnlocked();
+  const found = [data, ...data.families.flatMap((family) => family.vaults)].map((items) => findAttachment(items, itemId, fileId)).find(Boolean);
+  if (!found) fail('error.fileGone');
+  const address = await withApi((api) => api.fileAddress(fileId)).catch(fileFailure);
+  return { url: new URL(address.url, SERVER.baseUrl).href, expiresAt: address.expiresAt, file: found.file };
+}
+
+/**
+ * Deletes in the account the files no item names any more, and each upload
+ * a page gave up on. One the account no longer has is as good as deleted;
+ * one it cannot delete now waits for the next sync.
+ */
+async function deleteLeftFiles(api: HttpSyncAdapter): Promise<void> {
+  const waiting = (await requireUnlocked()).data.account?.filesToDelete ?? [];
+  const deleted: string[] = [];
+  for (const id of waiting) {
+    try {
+      await deleteStoredFile(api, id);
+      deleted.push(id);
+    } catch (error) {
+      // Not offered now is not gone: it waits until the account keeps files again.
+      if (error instanceof SyncHttpError && error.code === 'not_offered') break;
+    }
+  }
+  if (deleted.length) {
+    await serial(async () => {
+      const open = await requireUnlocked();
+      await commit(open, filesDeleted(open.data, deleted), true);
+    });
+  }
+  const now = Date.now();
+  for (const [id, upload] of Object.entries(await uploads.read())) {
+    if (now - upload.at < UPLOAD_ABANDONED) continue;
+    await deleteStoredFile(api, id).catch(() => undefined);
+    await tableTurn(() => uploads.remove(id));
+  }
+}
+
+async function readGrantor(grantId: string): Promise<EmergencyRead> {
+  const read = await withProductKey((api, productKey) => readEmergency(api, productKey, grantId));
+  if (!read) fail('error.accountNone');
+  if (read.status !== 'open') return read;
+  // Every kind, read only: no passkey's private key reaches a page, and no
+  // versions or files, which a page would ask of this account's own vault.
+  const strip = <T extends { versions?: unknown; attachments?: unknown; detached?: unknown }>({ versions: _v, attachments: _a, detached: _d, ...rest }: T) => rest;
+  return {
+    status: 'open',
+    items: read.data.items.filter((item) => item.deletedAt === null).map((item) => ({ ...strip(item), passkey: null })),
+    wallet: read.data.wallet.filter((item) => item.deletedAt === null).map((item) => strip(item) as WalletItem),
+  };
 }
 
 // --- Starting over, with nothing left but the email -------------------------------------
@@ -3004,6 +3348,7 @@ function removeVault(): Promise<void> {
     await tableTurn(async () => {
       await menus.write({});
       await pending.write({});
+      await firstSteps.write({});
       await passkeyRequests.write({});
       await cardFrames.write({});
     });
@@ -3033,83 +3378,21 @@ async function runSync(): Promise<SyncResult> {
     tokens = answer.tokens;
     return answer.value;
   };
-  const ours = (open: UnlockedVault) => (open.data.account?.productKey === productKey ? open.data.account : null);
 
   try {
-    let since = link.serverRev;
-    let epoch = link.epoch;
-    let restored = false;
-    const records: RemoteRecord[] = [];
-    // A server that always says there is more stops here, not never.
-    for (let page = 0; page < 40; page++) {
-      const answer = await authed((token) => pull(token, since));
-      if (epoch && answer.epoch && answer.epoch !== epoch && !restored) {
-        // Restored from a backup, the server forgot what came after it: start
-        // over, and everything here goes back up.
-        restored = true;
-        since = 0;
-        records.length = 0;
-        epoch = answer.epoch;
-        continue;
-      }
-      records.push(...answer.records);
-      since = answer.serverRev;
-      epoch = answer.epoch ?? epoch;
-      if (!answer.hasMore) break;
-    }
-    // When the account's recovery key was last set, for the page to say whether this vault holds it.
-    const state = await authed(accountKeys);
-    // And whether a sheet was seen to open the root since: typed in another
-    // Passhold browser, or on account.keyrook.com, which says so on every
-    // product's pin. Only a pin that opens under Passhold's key, naming the
-    // root this vault is sealed to, is read: the server can write neither.
-    const pin = state.box && link.accountId ? await readPassholdPin(await importDataKey(productKey), state.box.pin, link.accountId) : null;
-
-    const planned = await serial(async () => {
-      const open = await requireUnlocked();
-      const account = ours(open);
-      if (!account) return null;
-      const pulled = await applyPulled(open.data, restored ? {} : account.known, records, key, previous);
-      const plan = await planPush(pulled.data, pulled.known, key, account.deviceId);
-      const kit = nextAccountKit(account.kit, state.recovery.wrappedAt);
-      const seen = pin?.root === account.root ? pin.sheetVerifiedAt : null;
-      const sheetVerifiedAt = seen !== null && seen > (account.sheetVerifiedAt ?? 0) ? seen : account.sheetVerifiedAt;
-      // The account's name as the server says it now, so one changed on account.keyrook.com shows here at the
-      // next sync; an older server says nothing, and what was known stays.
-      const name = state.name === undefined ? account.name : cleanAccountName(state.name);
-      // And its address: moved there, the account keeps every session, so this one hears it here. Without it, a
-      // new recovery key would ask the server for an address it no longer knows, and be refused the password. An
-      // older server says nothing.
-      const email = syncedAddress(state.email) ?? account.email;
-      const link: AccountLink = { ...account, email, name, tokens, known: pulled.known, serverRev: since, epoch, kit, sheetVerifiedAt, pendingStartOver: state.pendingStartOver ?? null };
-      await commit(open, { ...pulled.data, account: link }, true);
-      return { plan, removed: pulled.removed, skipped: pulled.skipped };
-    });
-    if (!planned) return { removed: 0, skipped: 0 };
-
-    const accepted: { id: string; rev: number }[] = [];
-    const conflicts: RemoteRecord[] = [];
-    for (let at = 0; at < planned.plan.records.length; at += 200) {
-      const answer = await authed((token) => push(token, planned.plan.records.slice(at, at + 200), since));
-      accepted.push(...answer.accepted);
-      conflicts.push(...answer.conflicts);
-    }
-
-    await serial(async () => {
-      const open = await requireUnlocked();
-      const account = ours(open);
-      if (!account) return;
-      const known = acceptPushed(account.known, planned.plan, accepted);
-      const merged = await applyPulled(open.data, known, conflicts, key, previous);
-      // Every record sealed again under the new key and on the server: the one before is let go.
-      const previousKey = account.previousKey && allSent(merged.known) ? null : account.previousKey;
-      await commit(open, { ...merged.data, account: { ...account, tokens, known: merged.known, lastSyncAt: Date.now(), previousKey } }, true);
-    });
-    if (conflicts.length) scheduleSync(1_000);
+    // The round is the core's, shared with the web vault (account/round.ts); the session and the queue are this worker's.
+    const round = await syncOwnRecords(
+      { pull: (since) => authed((token) => pull(token, since)), push: (records, since) => authed((token) => push(token, records, since)), accountKeys: () => authed(accountKeys) },
+      syncTurn(productKey, () => tokens),
+      { productKey: await importDataKey(productKey), records: key, previous },
+      link,
+    );
+    if (!round) return { removed: 0, skipped: 0 };
+    if (round.again) scheduleSync(1_000);
     // Then the families, in this same round: one session at a time. A family
     // that fails is tried again next round, and takes nothing of this one's.
     await syncFamilies().catch(() => undefined);
-    return { removed: planned.removed, skipped: planned.skipped };
+    return { removed: round.removed, skipped: round.skipped };
   } catch (error) {
     // Rotated before the failure, the new tokens are the only good ones; signed
     // out, there are none.
@@ -3117,7 +3400,7 @@ async function runSync(): Promise<SyncResult> {
     if (signedOut || tokens !== link.tokens) {
       await serial(async () => {
         const open = await current();
-        const account = open && ours(open);
+        const account = open?.data.account?.productKey === productKey ? open.data.account : null;
         if (!open || !account) return;
         await commit(open, signedOut ? await signedOutData(open.data, account, error) : { ...open.data, account: { ...account, tokens } }, true);
       });
@@ -3126,263 +3409,37 @@ async function runSync(): Promise<SyncResult> {
   }
 }
 
-// --- families --------------------------------------------------------------------------
-
-type Shared = FamilyRecord<FamilyValue>;
-
-/** Where this browser stands with a family, as `openFamily` left it. */
-function familyState(opened: OpenedFamily): FamilyState {
-  switch (opened.status) {
-    case 'open':
-      return { kind: 'open' };
-    case 'waiting':
-      return { kind: 'waiting' };
-    case 'needs-root':
-      return { kind: 'needs-root' };
-    case 'compare':
-      return { kind: 'compare', accountId: opened.accountId, memberKey: opened.memberKey, code: opened.code };
-  }
-}
-
 /**
- * The family as the vault keeps it, from what `openFamily` checked: who is in
- * it and their place from the roster, whose MAC the server cannot make; their
- * addresses and names from the server, shown as text.
+ * This worker's turn for a round (`VaultTurn`): the vault's queue, with the
+ * read inside it, while the vault is open and still signed in with the
+ * Passhold key the round began with. `tokens`: the session's, as they are
+ * now, kept with what the step hands back.
  */
-function familyLink(family: ProductFamily, before: FamilyLink | undefined, rest: Pick<FamilyLink, 'left' | 'serverRev' | 'epoch' | 'vaults'>): FamilyLink {
-  const named = new Map(family.detail.members.map((member) => [member.accountId, member]));
-  const lines = family.roster.body.members;
-  // The server stops naming someone it dropped while the roster, until the keys
-  // change, still lists them: taken at its word they would lose their name here
-  // just before Passhold has to say who went.
-  const known = (accountId: string) => named.get(accountId) ?? before?.members.find((member) => member.accountId === accountId);
-  return {
-    orgId: family.orgId,
-    name: cleanAccountName(family.detail.org.name) ?? before?.name ?? family.orgId,
-    role: lines.find((line) => line.accountId === family.accountId)?.role === 'owner' ? 'owner' : 'member',
-    members: lines.map((line) => ({
-      accountId: line.accountId,
-      email: known(line.accountId)?.email || line.accountId,
-      name: cleanAccountName(known(line.accountId)?.name),
-      role: line.role === 'owner' ? 'owner' : 'member',
-      verified: line.verified,
-    })),
-    pin: family.pinned,
-    keyChanged: family.keyChanged,
-    state: { kind: 'open' },
-    rotationDue: family.detail.org.rotationDue || dueVaults(family).size > 0,
-    ...rest,
-  };
-}
-
-/**
- * Those to tell of someone gone: whoever is told of already, and `named`, as
- * this browser last knew them, for neither the roster nor the server says any
- * more. One the roster lists again is back, and no longer gone.
- */
-function departures(family: ProductFamily, before: FamilyLink | undefined, named: Set<string>): FamilyLink['left'] {
-  const told = before?.left ?? [];
-  const fresh = [...named]
-    .filter((accountId) => !told.some((person) => person.accountId === accountId))
-    .map((accountId) => {
-      const known = before?.members.find((member) => member.accountId === accountId);
-      // Someone nobody ever named here is filed under their id, which tells a person nothing.
-      return { accountId, email: known && known.email !== accountId ? known.email : '', name: known?.name ?? null };
+function syncTurn(productKey: string, tokens?: () => Tokens): VaultTurn {
+  return <T,>(step: (data: VaultData) => Promise<{ data?: VaultData; value: T }>) =>
+    serial(async (): Promise<T | null> => {
+      const open = await requireUnlocked();
+      if (open.data.account?.productKey !== productKey) return null;
+      const { data, value } = await step(open.data);
+      if (data) await commit(open, tokens && data.account ? { ...data, account: { ...data.account, tokens: tokens() } } : data, true);
+      return value;
     });
-  return [...told, ...fresh].filter((person) => !family.roster.body.members.some((line) => line.accountId === person.accountId));
 }
 
-/** The family's shared vaults of this account whose key someone who left still holds, until an organiser changes it. */
-const dueVaults = (family: ProductFamily) =>
-  new Set(family.detail.collections.filter((collection) => collection.rotationDue && family.collections.some((mine) => mine.id === collection.id)).map((collection) => collection.id));
-
-const ownLink = (open: UnlockedVault, productKey: string) => open.data.account?.productKey === productKey;
+// --- families --------------------------------------------------------------------------
 
 /**
  * Each family of the account, after the vault's own records and in the same
- * round (`syncNow`), so one session at a time. A family is opened with
- * Passhold's key and its roster checked against the pin kept here
- * (`openFamily`); each shared vault's records are pulled, merged and pushed as
- * the flows open and seal them. One family that fails leaves the others, and
- * the vault's own, as they were; the next round tries it again.
+ * round (`syncNow`), so one session at a time: the core's round
+ * (account/round.ts), on this vault's session.
  */
 async function syncFamilies(): Promise<void> {
   const link = (await current())?.data.account;
   const productKey = await productKeyOf(link);
   if (!link?.tokens || !link.productKey || !productKey) return;
-  const raw = link.productKey;
   const previousKey = link.previousKey ? await importDataKey(link.previousKey) : undefined;
-  await withApi(async (api) => {
-    let listed: { id: string; name: string; role: string }[];
-    try {
-      listed = (await api.orgs()).orgs.filter((org) => org.kind === 'family');
-    } catch (error) {
-      // A server that offers no families: none is kept, but what was never sent of them.
-      if (!(error instanceof SyncHttpError && error.code === 'not_offered')) throw error;
-      listed = [];
-    }
-    for (const org of listed) {
-      await syncFamily(api, productKey, raw, previousKey, link.deviceId, org).catch(() => undefined);
-    }
-    await serial(async () => {
-      const open = await requireUnlocked();
-      if (!ownLink(open, raw)) return;
-      const ids = new Set(listed.map((org) => org.id));
-      if (open.data.families.every((family) => ids.has(family.orgId))) return;
-      // A family left, or gone: its shared vaults go, with what was never sent kept.
-      const kept = await dropFamilyVaults(open.data, ({ orgId }) => ids.has(orgId));
-      await commit(open, { ...kept, families: kept.families.filter((family) => ids.has(family.orgId)) }, true);
-    });
-  });
-}
-
-async function syncFamily(
-  api: HttpSyncAdapter,
-  productKey: ProductKey,
-  raw: string,
-  previousKey: CryptoKey | undefined,
-  deviceId: string,
-  org: { id: string; name: string; role: string },
-): Promise<void> {
-  const held = (await requireUnlocked()).data.families.find((family) => family.orgId === org.id);
-  let opened = await openFamily(api, { productKey, orgId: org.id, pinned: held?.pin ?? null, previousKey });
-  // Each opening names only who is gone since the pin it was given, and opening
-  // again below goes from this one's: read from the last alone, someone would go unsaid.
-  const left = new Set(opened.status === 'open' ? opened.family.left : []);
-  if (opened.status === 'open') {
-    // Someone went: an organiser's Passhold gives everyone left new keys as it
-    // syncs, and reads and writes under them in the same round. One whose key
-    // this browser has not taken is compared first (`keyChanged`), and a
-    // rotation that does not go through now is tried again next round; what
-    // was changed waits here meanwhile (`keyDue`).
-    const turned = await rotateFamilyKeys(api, opened.family).catch(() => null);
-    if (turned?.status === 'rotated' || turned?.status === 'stale') {
-      opened = await openFamily(api, { productKey, orgId: org.id, pinned: opened.family.pinned, previousKey });
-    }
-  }
-  if (opened.status !== 'open') {
-    // Nothing of it is read or written until it opens: what it held here stays as it was.
-    const state = familyState(opened);
-    await serial(async () => {
-      const open = await requireUnlocked();
-      if (!ownLink(open, raw)) return;
-      const before = open.data.families.find((family) => family.orgId === org.id);
-      const next: FamilyLink = before
-        ? { ...before, state }
-        : { orgId: org.id, name: cleanAccountName(org.name) ?? org.id, role: org.role === 'owner' ? 'owner' : 'member', members: [], pin: null, keyChanged: [], left: [], state, rotationDue: false, serverRev: 0, epoch: null, vaults: [] };
-      await commit(open, { ...open.data, families: [...open.data.families.filter((family) => family.orgId !== org.id), next] }, true);
-    });
-    return;
-  }
-  const family = opened.family;
-  for (const accountId of family.left) left.add(accountId);
-  const due = dueVaults(family);
-
-  let since = held?.serverRev ?? 0;
-  let epoch = held?.epoch ?? null;
-  let restored = false;
-  const records: Shared[] = [];
-  const unreadable: UnreadableRecord[] = [];
-  // A server that always says there is more stops here, not never.
-  for (let page = 0; page < 40; page++) {
-    const answer = await pullFamily<FamilyValue>(api, family, { since, epoch });
-    if (answer.restored && !restored) {
-      // Restored from a backup, the server forgot what came after it: from the start, and everything here goes back up.
-      restored = true;
-      since = 0;
-      records.length = 0;
-      unreadable.length = 0;
-      epoch = answer.epoch;
-      continue;
-    }
-    records.push(...answer.records);
-    unreadable.push(...answer.unreadable);
-    since = answer.serverRev;
-    epoch = answer.epoch;
-    if (!answer.hasMore) break;
-  }
-  // A collection just shared with this account holds what came before the family's counter stood here.
-  for (const collection of family.collections) {
-    if (!held || restored || held.vaults.some((vault) => vault.id === collection.id)) continue;
-    for (let after = 0, page = 0; page < 40; page++) {
-      const answer = await pullFamily<FamilyValue>(api, family, { since: after, collectionId: collection.id });
-      records.push(...answer.records);
-      unreadable.push(...answer.unreadable);
-      after = answer.serverRev;
-      if (!answer.hasMore) break;
-    }
-  }
-
-  const planned = await serial(async () => {
-    const open = await requireUnlocked();
-    if (!ownLink(open, raw)) return null;
-    const before = open.data.families.find((entry) => entry.orgId === org.id);
-    const vaults: FamilyVault[] = [];
-    for (const collection of family.collections) {
-      const kept = before?.vaults.find((vault) => vault.id === collection.id);
-      // Its key was changed since: the server holds it under the one before, and each product seals its own again (`consoleRotateFamily`).
-      const known = !kept || restored ? {} : collection.generation > kept.generation ? resendAll(kept.known) : kept.known;
-      const base: FamilyVault = kept
-        ? { ...kept, name: collection.name, generation: collection.generation, keyDue: due.has(collection.id), known }
-        : { id: collection.id, name: collection.name, generation: collection.generation, keyDue: due.has(collection.id), items: [], wallet: [], known: {} };
-      vaults.push((await mergeFamilyPulled(base, records, unreadable)).vault);
-    }
-    const gone = before?.vaults.filter((vault) => !family.collections.some((collection) => collection.id === vault.id)) ?? [];
-    const placed = { ...open.data, families: [...open.data.families.filter((entry) => entry.orgId !== org.id), familyLink(family, before, { left: departures(family, before, left), serverRev: since, epoch, vaults: [...vaults, ...gone] })] };
-    // A shared vault this account is no longer let into goes, with what was never sent kept.
-    const data = await dropFamilyVaults(placed, ({ orgId, vaultId }) => orgId !== org.id || family.collections.some((collection) => collection.id === vaultId));
-    await commit(open, data, true);
-    const plans: { vaultId: string; plan: Awaited<ReturnType<typeof planFamilyPush>> }[] = [];
-    for (const vault of familyLinkOf(data, org.id)?.vaults ?? []) plans.push({ vaultId: vault.id, plan: await planFamilyPush(vault, vault.known) });
-    return plans;
-  });
-  if (!planned) return;
-
-  // Sealed and sent outside the vault's queue, as the vault's own records are.
-  const sent: { vaultId: string; plan: Awaited<ReturnType<typeof planFamilyPush>>; accepted: { id: string; rev: number }[]; conflicts: Shared[]; blind: UnreadableRecord[] }[] = [];
-  for (const { vaultId, plan } of planned) {
-    // Sealed now, it would be under a key someone gone still holds, and the
-    // server refuses it: it waits here, unsent, for the key an organiser gives
-    // next. Sent anyway, every round would come back refused, and try again.
-    if (!plan.records.length || due.has(vaultId)) continue;
-    const sealed = [];
-    for (const change of plan.records) {
-      sealed.push(await sealFamilyRecord(family, { collectionId: vaultId, id: change.id, kind: change.kind, rev: change.rev, value: change.value, updatedAt: change.updatedAt, deviceId }));
-    }
-    const accepted: { id: string; rev: number }[] = [];
-    const conflicts: Shared[] = [];
-    const blind: UnreadableRecord[] = [];
-    try {
-      for (let at = 0; at < sealed.length; at += 200) {
-        const answer = await pushFamily<FamilyValue>(api, family, sealed.slice(at, at + 200));
-        accepted.push(...answer.accepted);
-        conflicts.push(...answer.conflicts);
-        blind.push(...answer.unreadable);
-      }
-    } catch (error) {
-      // Its key changed since the family was opened: opened again next round, and sealed anew.
-      if (!(error instanceof SyncHttpError && error.status === 409)) throw error;
-      scheduleSync(1_000);
-    }
-    sent.push({ vaultId, plan, accepted, conflicts, blind });
-  }
-  if (!sent.length) return;
-
-  await serial(async () => {
-    const open = await requireUnlocked();
-    if (!ownLink(open, raw)) return;
-    let data = open.data;
-    for (const { vaultId, plan, accepted, conflicts, blind } of sent) {
-      const place = { orgId: org.id, vaultId };
-      if (!familyLinkOf(data, org.id)?.vaults.some((vault) => vault.id === vaultId)) continue;
-      const { vault } = familyVault(data, place);
-      // A newer revision there comes back opened: joined with this one, which goes up again above it.
-      const merged = await mergeFamilyPulled({ ...vault, known: acceptPushed(vault.known, plan, accepted) }, conflicts, blind);
-      data = inFamilyVault(data, place, () => merged.vault);
-    }
-    await commit(open, data, true);
-  });
-  if (sent.some(({ conflicts, blind }) => conflicts.length > 0 || blind.length > 0)) scheduleSync(1_000);
+  const again = await withApi((api) => syncFamilyRound(api, syncTurn(link.productKey!), { productKey, previousKey, deviceId: link.deviceId }));
+  if (again) scheduleSync(1_000);
 }
 
 const familyLinkOf = (data: VaultData, orgId: string) => data.families.find((family) => family.orgId === orgId);
@@ -3587,6 +3644,8 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
 
     case 'provider/start':
       return startProvider(request.provider);
+    case 'provider/answer':
+      return typeof request.answer === 'string' && request.answer.length <= 4096 ? finishProvider(new URLSearchParams(request.answer)) : false;
     case 'provider/view':
       return providerView();
     case 'provider/create':
@@ -3845,6 +3904,48 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
     case 'family/compareCode':
       return { code: await familyCode(request.orgId, request.accountId) };
 
+    case 'codes/forLogin':
+      return codesFor(anyLogin((await requireUnlocked()).data, request.id), await linkedCodes());
+    case 'codes/add':
+      return addCode(request.id, String(request.setup ?? ''));
+    case 'send/create':
+      return makeSend(request);
+    case 'send/begin':
+      return beginSend(request);
+    case 'send/finish': {
+      const finished = await withProductKey((api) => api.finishSend(String(request.id)));
+      if (!finished) fail('error.accountNone');
+      return finished;
+    }
+    case 'send/cancel':
+      await withProductKey((api) => api.deleteSend(String(request.id)));
+      return;
+    case 'checkup/breach': {
+      const { data } = await requireUnlocked();
+      // The plan first: on one without it, not a character of a hash goes to
+      // learn so from the server's refusal, whatever a page asks.
+      if (!allows(data, 'breach')) fail('error.notOnPlan');
+      const exposed = await withProductKey((api) => exposedLogins(api, data));
+      if (!exposed) fail('error.accountNone');
+      return { exposed };
+    }
+    case 'emergency/view': {
+      // As the last sync saw it: Settings opening asks the server nothing.
+      const account = (await requireUnlocked()).data.account;
+      const held = await loadEmergency();
+      return account?.tokens && held?.accountId === account.accountId ? held.view : { status: 'none' };
+    }
+    case 'emergency/trust':
+      await withProductKey(async (api, productKey) => {
+        await trustEmergency(api, productKey, request.grantId);
+        // Compared: Passhold's key goes to them now if this account named them, and Settings shows where things stand.
+        await handOverEmergency(api, productKey);
+        await saveEmergency({ accountId: productKey.accountId, view: await emergencyView(api, productKey) });
+      });
+      return;
+    case 'emergency/read':
+      return readGrantor(request.grantId);
+
     case 'family/trust':
       return trustMember(request.orgId, request.accountId, request.memberKey);
 
@@ -3855,15 +3956,31 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
       return lock();
 
     case 'vault/mutate':
-      await change((data) => applyMutation(data, request.mutation));
+      // Files no item names any more after it — a trash emptied, a file taken off — are deleted in the account after the next sync.
+      await change((data) => forgetFiles(data, applyMutation(data, request.mutation)));
       return;
+
+    case 'files/begin':
+      return beginUpload(request.itemId, request.id, request.size);
+
+    case 'files/finish':
+      return finishUpload(request.id);
+
+    case 'files/cancel':
+      return cancelUpload(request.id);
+
+    case 'files/attach':
+      return attachUpload(request);
+
+    case 'files/open':
+      return openStoredFile(request.itemId, request.fileId);
 
     case 'vault/exportCsv': {
       const vault = await requireUnlocked();
       // Plain text leaves the vault here, so being unlocked is not enough:
       // whoever is at an unlocked browser has to prove they are its owner too.
       await prove(vault, request.proof);
-      return { csv: exportCsv(vault.data.items) };
+      return { csv: request.kind === 'apikey' ? exportApiKeysCsv(vault.data.wallet) : exportCsv(vault.data.items) };
     }
 
     case 'vault/backup':
@@ -4026,6 +4143,14 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
       return;
     }
 
+    case 'prompt/size': {
+      const entry = (await livePending()).find((candidate) => candidate.token === request.token);
+      if (!entry || sender.tab?.id !== entry.tabId) return;
+      const height = Math.round(Math.min(Math.max(Number(request.height) || 0, 60), 320));
+      await chrome.tabs.sendMessage<ToContent>(entry.tabId, { type: 'ph/promptSize', height }, { frameId: 0 }).catch(() => undefined);
+      return;
+    }
+
     case 'prompt/view': {
       const entry = (await livePending()).find((candidate) => candidate.token === request.token);
       if (!entry || sender.tab?.id !== entry.tabId) return null;
@@ -4042,8 +4167,9 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
 
     case 'pending/view': {
       const tab = await activeTab();
+      // Only one that went through: the popup never asks to keep a password the site refused.
       const entry = (await livePending()).filter((candidate) => candidate.tabId === tab?.id).at(-1);
-      return entry ? pendingView(entry) : null;
+      return entry?.sure ? pendingView(entry) : null;
     }
 
     case 'pending/answer': {
@@ -4074,6 +4200,8 @@ async function handleContent(request: ContentRequest, sender: chrome.runtime.Mes
   // The frame's own address, as Chrome reports it — never one the script sends.
   const site = sender.url ? siteOf(sender.url) : null;
   if (tabId === undefined || !site || site.origin !== sender.origin) return null;
+  // The web vault: nothing offered, filled, saved or signed there (`VAULT_PAGE_ORIGIN`).
+  if (site.origin === VAULT_PAGE_ORIGIN) return null;
 
   switch (request.type) {
     case 'content/hello': {
@@ -4123,11 +4251,11 @@ async function handleContent(request: ContentRequest, sender: chrome.runtime.Mes
         rect !== null &&
         typeof rect.word === 'string' &&
         /^[0-9a-f]{32}$/.test(rect.word) &&
-        [rect.left, rect.top, rect.bottom].every((value) => Number.isFinite(value))
+        [rect.left, rect.right, rect.top, rect.bottom].every((value) => Number.isFinite(value))
           ? await chrome.tabs
               .sendMessage<ToContent, { hosted: boolean } | undefined>(
                 tabId,
-                { type: 'ph/hostMenu', token, word: rect.word, rect: { left: rect.left, top: rect.top, bottom: rect.bottom }, height, auto: request.auto === true },
+                { type: 'ph/hostMenu', token, word: rect.word, rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }, height, auto: request.auto === true },
                 { frameId: 0 },
               )
               .then((answer) => answer?.hosted === true)
@@ -4147,15 +4275,56 @@ async function handleContent(request: ContentRequest, sender: chrome.runtime.Mes
       const password = typeof request.password === 'string' ? request.password.slice(0, 10_000) : '';
       const username = typeof request.username === 'string' ? request.username.trim().slice(0, 1_000) : '';
       if (!password) return;
+      if (site.origin === ACCOUNT_PAGE_ORIGIN) return;
       if (!(await loadVaultFile()) || !(await loadPrefs()).offerToSave) return;
+      const passwordNow = typeof request.current === 'string' ? request.current.slice(0, 10_000) : '';
       const url = `${site.origin}${new URL(sender.url!).pathname}`;
-      const entry: PendingSave = { id: newToken(), token: newToken(), tabId, url, username, password, at: Date.now(), shownIn: [] };
+      // A password-only page after a first step that named the account.
+      const named = username || (await firstStepFor(tabId, siteName(site)));
+      const entry: PendingSave = {
+        id: newToken(),
+        token: newToken(),
+        tabId,
+        url,
+        username: named,
+        password,
+        ...(passwordNow ? { current: passwordNow } : {}),
+        documentId: sender.documentId,
+        frameId: sender.frameId,
+        sure: false,
+        at: Date.now(),
+        shownIn: [],
+      };
       const vault = await current();
       if (vault) {
-        const verdict = judgeCapture(vault.data, site, username, password);
-        if (verdict.kind === 'known' || verdict.kind === 'neverSave') return;
+        const verdict = judgeCapture(vault.data, site, named, password, passwordNow);
+        if (verdict.kind !== 'new' && verdict.kind !== 'update') return;
       }
       await holdPending(entry);
+      return;
+    }
+
+    case 'content/signInSettled': {
+      if (!sender.documentId) return;
+      const settled = await tableTurn(async () => {
+        const entry = (await livePending()).find((candidate) => candidate.tabId === tabId && candidate.documentId === sender.documentId && !candidate.sure);
+        if (!entry) return null;
+        if (request.through !== true) {
+          await pending.remove(entry.id);
+          return null;
+        }
+        const sure = { ...entry, sure: true };
+        await pending.put(entry.id, sure);
+        return sure;
+      });
+      if (settled) await showPromptIn(settled);
+      return;
+    }
+
+    case 'content/firstStep': {
+      const username = typeof request.username === 'string' ? request.username.trim().slice(0, 1_000) : '';
+      if (!username || site.origin === ACCOUNT_PAGE_ORIGIN) return;
+      await tableTurn(() => firstSteps.put(String(tabId), { tabId, site: siteName(site), username, at: Date.now() }));
       return;
     }
 
@@ -4166,7 +4335,7 @@ async function handleContent(request: ContentRequest, sender: chrome.runtime.Mes
       const address = sentAddress(request.address);
       if (!card && !address) return;
       const url = `${site.origin}${new URL(sender.url!).pathname}`;
-      const entry: PendingSave = { id: newToken(), token: newToken(), tabId, url, username: '', password: '', card, address, at: Date.now(), shownIn: [] };
+      const entry: PendingSave = { id: newToken(), token: newToken(), tabId, url, username: '', password: '', card, address, sure: true, at: Date.now(), shownIn: [] };
       const vault = await current();
       if (vault && !checkoutView(entry, siteName(site), vault.data)) return;
       await holdPending(entry);
@@ -4202,14 +4371,36 @@ async function handleContent(request: ContentRequest, sender: chrome.runtime.Mes
     }
 
     case 'content/checkPrompt': {
-      // Only the top frame draws the prompt, once per document.
-      if (sender.frameId !== 0 || !sender.documentId) return null;
-      return tableTurn(async () => {
-        const entry = (await livePending()).filter((candidate) => candidate.tabId === tabId).at(-1);
-        if (!entry || entry.shownIn.includes(sender.documentId!)) return null;
-        await pending.put(entry.id, { ...entry, shownIn: [...entry.shownIn, sender.documentId!] });
-        return { token: entry.token };
+      if (!sender.documentId || sender.frameId === undefined) return null;
+      const documentId = sender.documentId;
+      const frameId = sender.frameId;
+      // Every frame of every page asks: most, with nothing waiting in their tab, without a turn.
+      if (!(await livePending()).some((candidate) => candidate.tabId === tabId)) return null;
+      const { show, token } = await tableTurn(async (): Promise<{ show: PendingSave | null; token: string | null }> => {
+        let entry = (await livePending()).filter((candidate) => candidate.tabId === tabId).at(-1);
+        if (!entry) return { show: null, token: null };
+        if (!entry.sure) {
+          // A new document where the sign-in was sent, or a new page in the tab:
+          // the sign-in went through, unless the page came back to a sign-in
+          // form — the one it was sent from, saying the password was wrong.
+          const after = documentId !== entry.documentId && (frameId === 0 || frameId === entry.frameId);
+          if (!after) return { show: null, token: null };
+          if (request.signInForm === true) {
+            await pending.remove(entry.id);
+            return { show: null, token: null };
+          }
+          entry = { ...entry, sure: true };
+          await pending.put(entry.id, entry);
+          // Settled by a frame inside the page: the top frame draws the prompt.
+          if (frameId !== 0) return { show: entry, token: null };
+        }
+        // Only the top frame draws the prompt, once per document.
+        if (frameId !== 0 || entry.shownIn.includes(documentId)) return { show: null, token: null };
+        await pending.put(entry.id, { ...entry, shownIn: [...entry.shownIn, documentId] });
+        return { show: null, token: entry.token };
       });
+      if (show) await showPromptIn(show);
+      return token ? { token } : null;
     }
   }
 }
@@ -4220,7 +4411,8 @@ async function handleContent(request: ContentRequest, sender: chrome.runtime.Mes
  * Passhold (`externally_connectable`), and the sender is checked here as
  * well; the tab then goes back to Passhold's own page.
  */
-chrome.runtime.onMessageExternal.addListener((message: unknown, sender, respond) => {
+// Firefox lets no web page message an extension, and has no such event.
+chrome.runtime.onMessageExternal?.addListener((message: unknown, sender, respond) => {
   const answer = (message as { answer?: unknown } | null)?.answer;
   const tabId = sender.tab?.id;
   if (sender.origin !== KEYROOK_ORIGIN || tabId === undefined || typeof answer !== 'string' || answer.length > 4096) return false;
@@ -4240,7 +4432,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
   if (typeof type !== 'string') return false;
 
   let work: Promise<unknown>;
-  if (isTrustedSender(sender, runtimeId)) {
+  if (isTrustedSender(sender, runtimeId, ownOrigin())) {
     // Our own broadcasts, and the offscreen document's private channel.
     if (type === VAULT_CHANGED || type.startsWith('offscreen/')) return false;
     work = handle(message as Request, sender);
@@ -4264,6 +4456,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
 // --- locking ------------------------------------------------------------------------------
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  // Only where there is no offscreen document to wait in (clipboard.ts).
+  if (alarm.name === CLIPBOARD_ALARM) {
+    void clearClipboardNow();
+    return;
+  }
   if (alarm.name === SYNC_ALARM) {
     void (async () => {
       if ((await current())?.data.account?.tokens) await syncNow().catch(() => undefined);
@@ -4296,6 +4493,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void tableTurn(async () => {
     const table = await pending.read();
     await pending.write(Object.fromEntries(Object.entries(table).filter(([, entry]) => entry.tabId !== tabId)));
+    await firstSteps.remove(String(tabId));
     const open = await menus.read();
     await menus.write(Object.fromEntries(Object.entries(open).filter(([, session]) => session.tabId !== tabId)));
     const asking = await passkeyRequests.read();

@@ -1,0 +1,55 @@
+/*
+ * The extension's styles, and what a page in a phone's browser needs beside
+ * them. Classes come from the web vault's own source and the extension's
+ * screens it shares, nothing else (`source(none)`), so the public tree and
+ * the private one build the same file.
+ */
+@import 'tailwindcss' source(none);
+@source '../src';
+@source '../../extension/src/ui';
+@source '../../extension/src/popup';
+@source '../../extension/src/options';
+@import '../../extension/src/styles/theme.css';
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  min-width: 320px;
+}
+
+/* The screen's notches and rounded corners: nothing sits under them. */
+.safe {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/*
+ * A finger, not a pointer: every control at least 44 by 44 points, and a
+ * field's text at 16 pixels, below which Safari zooms the page into it.
+ */
+@media (pointer: coarse) {
+  button,
+  a[href],
+  select,
+  summary,
+  [role='button'],
+  [role='radio'],
+  [role='tab'] {
+    min-height: 44px;
+  }
+  button,
+  [role='button'],
+  [role='radio'],
+  [role='tab'] {
+    min-width: 44px;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+    min-height: 44px;
+  }
+}

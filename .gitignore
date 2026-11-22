@@ -12,3 +12,6 @@ playwright-report/
 # Build output, browser profiles, review screenshots: everything a task makes
 # that is not source lives here, inside the repository.
 .tmp/
+# The Android toolchain's own writes (Gradle's caches, the debug signing key):
+# pointed here by name, never left to the home directory.
+.toolchain/

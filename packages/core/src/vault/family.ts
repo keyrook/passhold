@@ -117,7 +117,11 @@ export function moveToFamily(data: VaultData, id: string, place: VaultPlace, now
   if (!item) throw new PassholdError('itemNotFound');
   // From the trash it would arrive in the family's trash, where nobody looks for it.
   if (item.deletedAt !== null) throw new PassholdError('itemInvalid');
-  const moved = { ...item, id: newId(), folder: '', updatedAt: now };
+  // Its files are this account's in the store, which no one else in the family may read: moved, they would open for nobody but its owner.
+  if (item.attachments?.length) throw new PassholdError('filesStay');
+  // Nor do its versions, which hold its earlier passwords and numbers.
+  const { versions: _, detached: __, ...current } = item;
+  const moved = { ...current, id: newId(), folder: '', updatedAt: now };
   const without = { ...data, items: data.items.filter((entry) => entry.id !== id), wallet: data.wallet.filter((entry) => entry.id !== id) };
   const next = inFamilyVault(without, place, (vault) =>
     login

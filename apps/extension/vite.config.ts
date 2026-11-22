@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
-import { accountPageFor, accountRpFor, checkApi, OFFICIAL_API } from './scripts/api.mjs';
+import { accountPageFor, accountRpFor, checkApi, OFFICIAL_API, sendPageFor, vaultPageFor } from './scripts/api.mjs';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
@@ -22,7 +22,7 @@ export default defineConfig({
   build: {
     outDir: process.env.PASSHOLD_DIST ?? 'dist',
     emptyOutDir: true,
-    target: 'chrome120',
+    target: process.env.PASSHOLD_TARGET ?? 'chrome120',
     sourcemap: false,
     rollupOptions: {
       input: {
@@ -53,5 +53,7 @@ export default defineConfig({
     __KEYROOK_API__: JSON.stringify(checkApi(process.env.KEYROOK_API ?? OFFICIAL_API)),
     __KEYROOK_ACCOUNT_RP__: JSON.stringify(accountRpFor(process.env.KEYROOK_API ?? OFFICIAL_API)),
     __KEYROOK_ACCOUNT_PAGE__: JSON.stringify(accountPageFor(process.env.KEYROOK_API ?? OFFICIAL_API)),
+    __KEYROOK_VAULT_PAGE__: JSON.stringify(vaultPageFor(process.env.KEYROOK_API ?? OFFICIAL_API)),
+    __KEYROOK_SEND_PAGE__: JSON.stringify(sendPageFor(process.env.KEYROOK_API ?? OFFICIAL_API)),
   },
 });

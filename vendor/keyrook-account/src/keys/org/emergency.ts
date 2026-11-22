@@ -1,11 +1,15 @@
 /**
- * Emergency access: someone's root, sealed by their own
- * device to the member key of the family member they chose, in an
- * authenticated box from their own member key. The server keeps it and the
- * wait, and hands it over once the wait is over and nobody refused; but it
- * opens for the chosen contact alone, and only as from the one who chose
- * them, whose key the contact takes from the pinned roster. A server that
- * handed it over early could give it to nobody else.
+ * Emergency access: someone's root, sealed by their own device to the member
+ * key of the family member they chose, in an authenticated box from their own
+ * member key. The server keeps it and the wait, and hands it over once the
+ * wait is over and nobody refused; but it opens for the chosen contact alone,
+ * and only as from the one who chose them, whose key the contact takes from
+ * the pinned roster. A server that handed it over early could give it to
+ * nobody else.
+ *
+ * No flow seals one any more: emergency access is between any two accounts,
+ * and hands over product keys, never the root. What is here stays so that the
+ * labels keep the one meaning they had.
  */
 import { DecryptionError } from '../../crypto/aead.js';
 import { CURVE, publicPointOf } from '../../crypto/ecdh.js';

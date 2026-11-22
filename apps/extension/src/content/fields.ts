@@ -13,6 +13,8 @@ const TEXT_TYPES = new Set(['text', 'email', 'tel', 'url', '']);
 /** Fields that look like a username but are a search box, a code or a captcha. */
 const NOT_USERNAME = /search|query|captcha|otp|one.?time|verification|2fa|totp|coupon|promo|zip|postal|phone.?code/i;
 const LOOKS_LIKE_USERNAME = /user|email|e-mail|login|account|identifier|mail/i;
+/** Forms that ask for an email without being a sign-in: a newsletter, a comment, a message to the site. */
+const NOT_SIGN_IN = /newsletter|subscri|comment|contact|message|feedback|enquir|inquir|bản tin|nhận tin|liên hệ|bình luận|góp ý/i;
 
 export function isVisible(element: HTMLElement): boolean {
   if (!element.isConnected) return false;
@@ -96,13 +98,30 @@ export function fieldKind(field: HTMLInputElement): Extract<FieldKind, 'login' |
     return 'login';
   }
   if (!isUsernameCandidate(field)) return null;
-  const { username } = loginFieldsIn(scopeOf(field));
-  if (username === field) return 'login';
-  // A first step that asks only for the username, password on the next page.
-  if (!passwordsIn(scopeOf(field)).length && (/username|email/.test(field.autocomplete) || LOOKS_LIKE_USERNAME.test(describe(field)))) {
-    return 'login';
-  }
-  return null;
+  const scope = scopeOf(field);
+  // No password beside it: a first step that asks only for the username,
+  // password on the next page — or a field that is not a sign-in at all.
+  if (!passwordsIn(scope).length) return looksLikeFirstStep(field) ? 'login' : null;
+  return loginFieldsIn(scope).username === field ? 'login' : null;
+}
+
+/**
+ * Whether a lone email or username field is a sign-in's first step. Named so
+ * by the page (`autocomplete="username"`), it is. Otherwise not when its form
+ * is a newsletter's, a comment's or a message's — a textarea, more than a
+ * couple of fields, or words that say so: Passhold's button in every email
+ * field of a site would be in the way, and its list would offer logins where
+ * none goes.
+ */
+function looksLikeFirstStep(field: HTMLInputElement): boolean {
+  if (/username|webauthn/.test(field.autocomplete)) return true;
+  if (!/email/.test(field.autocomplete) && !LOOKS_LIKE_USERNAME.test(describe(field))) return false;
+  const form = field.form;
+  if (!form) return !NOT_SIGN_IN.test(describe(field));
+  if (form.querySelector('textarea')) return false;
+  if ([...form.querySelectorAll('input')].filter((input) => TEXT_TYPES.has(input.type) && isVisible(input)).length > 2) return false;
+  const sends = [...form.querySelectorAll('button, input[type="submit"]')].map((control) => `${control.textContent ?? ''} ${(control as HTMLInputElement).value ?? ''}`);
+  return !NOT_SIGN_IN.test([form.id, form.className, form.getAttribute('action') ?? '', describe(field), ...sends].join(' '));
 }
 
 /** The password fields a new password goes into: all but a current-password one. */

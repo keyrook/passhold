@@ -14,7 +14,7 @@ import { LIMITS, type CustomField, type Items, type LoginItem, type VaultData, t
  * character — a direction override would turn what follows it around — but
  * the joiners some scripts write words with.
  */
-function oneLine(value: unknown, limit: number): string {
+export function oneLine(value: unknown, limit: number): string {
   if (typeof value !== 'string') return '';
   return value
     .slice(0, limit * 4)

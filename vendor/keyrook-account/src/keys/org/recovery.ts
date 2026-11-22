@@ -1,9 +1,9 @@
 /**
- * An organiser recovering a member: the organisation
- * recovery key `K`, an ECDH P-256 pair an organiser's device makes when the
- * family turns recovery on. Its public half is in the roster, under the
- * family key's MAC; its private half goes to each organiser in an
- * authenticated box from one who holds it, as the family key does.
+ * An organiser recovering a member: the organisation recovery key `K`, an ECDH
+ * P-256 pair an organiser's device makes when the family turns recovery on.
+ * Its public half is in the roster, under the family key's MAC; its private
+ * half goes to each organiser in an authenticated box from one who holds it,
+ * as the family key does.
  *
  * A member who turns recovery on seals their own root to `K`, in an
  * authenticated box from their own member key. Anyone can seal to a public

@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useState, type ComponentType, type SVGProps } from 'react';
 import { checkup } from '@passhold/core';
 import { useT } from '../i18n/react.js';
+import { PlanContext } from '../ui/plan.js';
 import type { MessageKey } from '../i18n/locales/en.js';
 import { APP_NAME } from '../lib/name.js';
 import { send } from '../lib/messaging.js';
 import { useVault } from '../ui/hooks.js';
-import { CloudIcon, CodeIcon, KeyIcon, LockIcon, PassholdMark, SettingsIcon, ShieldIcon, UsersIcon } from '../ui/icons.js';
+import { CloudIcon, CodeIcon, KeyIcon, LockIcon, PassholdMark, SettingsIcon, ShareIcon, ShieldIcon, UsersIcon } from '../ui/icons.js';
 import { Callout, cx } from '../ui/primitives.js';
 import { RecoveryKeyScreen, type RecoveryKind } from '../popup/RecoveryKeyScreen.js';
 import { UnlockScreen } from '../popup/UnlockScreen.js';
 import { deviceAvailable } from '../ui/device.js';
 import { setPasswordName } from '../ui/passwordName.js';
 import { AccountPanel } from './AccountPanel.js';
+import { EmergencyPanel } from './EmergencyPanel.js';
+import { SendPanel } from './SendPanel.js';
 import { BackupPanel, type BackupJob } from './BackupPanel.js';
 import { FamilyPanel } from './FamilyPanel.js';
 import { JoinAccount } from './JoinAccount.js';
@@ -25,7 +28,7 @@ import { SecurityPanel } from './SecurityPanel.js';
 
 const SOURCE = 'https://github.com/keyrook/passhold';
 
-type Tab = 'passwords' | 'account' | 'family' | 'security' | 'general';
+type Tab = 'passwords' | 'account' | 'send' | 'family' | 'security' | 'general';
 
 /**
  * Four tabs: the logins themselves (with what needs attention and the trash),
@@ -36,6 +39,7 @@ type Tab = 'passwords' | 'account' | 'family' | 'security' | 'general';
 const TABS: { id: Tab; label: MessageKey; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { id: 'passwords', label: 'nav.passwords', Icon: KeyIcon },
   { id: 'account', label: 'nav.accountSync', Icon: CloudIcon },
+  { id: 'send', label: 'send.title', Icon: ShareIcon },
   { id: 'family', label: 'nav.family', Icon: UsersIcon },
   { id: 'security', label: 'nav.security', Icon: LockIcon },
   { id: 'general', label: 'nav.general', Icon: SettingsIcon },
@@ -53,7 +57,11 @@ function fromHash(): { tab: Tab; job: BackupJob | null; view: PasswordsView } {
   if (hash === 'restore' || hash === 'import' || hash === 'export') return at('account', hash);
   if (hash === 'checkup') return at('passwords', null, 'attention');
   if (hash === 'trash') return at('passwords', null, 'trash');
-  if (hash === 'security' || hash === 'general' || hash === 'account' || hash === 'passwords' || hash === 'family') return at(hash);
+  if (hash === 'security' || hash === 'general' || hash === 'account' || hash === 'passwords' || hash === 'family' || hash === 'send') return at(hash);
+  // From the popup's Send a copy, naming the login.
+  if (hash.startsWith('send=')) return at('send');
+  // From the popup's Attach a file, naming the item: a file is chosen here.
+  if (hash.startsWith('files=')) return at('passwords');
   // Back from Google or GitHub, or signing in on a computer with no vault yet;
   // or sent from the popup to type the account's recovery key.
   if (hash === 'provider' || hash === 'signin' || hash === 'backup' || hash === 'kit') return at('account');
@@ -61,6 +69,10 @@ function fromHash(): { tab: Tab; job: BackupJob | null; view: PasswordsView } {
 }
 
 const START = fromHash();
+/** The login a Send was asked for from the popup, if one was. */
+const SEND_ITEM = location.hash.startsWith('#send=') ? decodeURIComponent(location.hash.slice('#send='.length)) : null;
+/** The item the popup sent here to attach a file to, if it did. */
+const FILES_ITEM = location.hash.startsWith('#files=') ? decodeURIComponent(location.hash.slice('#files='.length)) : null;
 /** Sent here to see the recovery key again — to print it, say: asked for at once. */
 const SHOW_RECOVERY = location.hash === '#recovery';
 
@@ -166,113 +178,118 @@ export function App() {
   const count = [...status.data.items, ...status.data.wallet].filter((item) => item.deletedAt === null).length;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl gap-12 px-6 py-10">
-      <aside className="sticky top-10 flex h-[calc(100vh-5rem)] w-56 shrink-0 flex-col">
-        <div className="mb-8 flex items-center gap-3 px-3">
-          <PassholdMark size={32} />
-          <div className="leading-tight">
-            <p className="text-[14.5px] font-semibold tracking-[-0.01em]">{APP_NAME}</p>
-            <p className="text-[12px] text-neutral-600 dark:text-neutral-400">{t('vault.count', { count })}</p>
+    <PlanContext.Provider value={status.plan}>
+      <div className="mx-auto flex min-h-screen w-full max-w-5xl gap-12 px-6 py-10">
+        <aside className="sticky top-10 flex h-[calc(100vh-5rem)] w-56 shrink-0 flex-col">
+          <div className="mb-8 flex items-center gap-3 px-3">
+            <PassholdMark size={32} />
+            <div className="leading-tight">
+              <p className="text-[14.5px] font-semibold tracking-[-0.01em]">{APP_NAME}</p>
+              <p className="text-[12px] text-neutral-600 dark:text-neutral-400">{t('vault.count', { count })}</p>
+            </div>
           </div>
-        </div>
 
-        <nav aria-label={t('settings.title')} className="flex flex-col gap-1">
-          {TABS.filter(({ id }) => id !== 'family' || status.data.families.length > 0).map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => go(id)}
-              aria-current={tab === id ? 'page' : undefined}
-              // Said beside the name, not in it: the tab is still "Passwords".
-              aria-description={id === 'passwords' && attention ? t('nav.needsAttention') : undefined}
-              className={cx(
-                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-start text-[14px] font-medium transition-colors',
-                tab === id
-                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300'
-                  : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:hover:text-neutral-200',
-              )}
-            >
-              <Icon className={cx('h-[18px] w-[18px] shrink-0', tab === id ? 'text-brand-600 dark:text-brand-400' : 'text-neutral-400 dark:text-neutral-500')} />
-              {t(label)}
-              {id === 'passwords' && attention && <span className="ms-auto h-2 w-2 rounded-full bg-yellow-500" aria-hidden="true" data-testid="nav-attention" />}
-            </button>
-          ))}
-        </nav>
+          <nav aria-label={t('settings.title')} className="flex flex-col gap-1">
+            {TABS.filter(({ id }) => (id !== 'family' || status.data.families.length > 0) && (id !== 'send' || (status.account !== null && (status.plan.send || status.plan.offered)))).map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => go(id)}
+                aria-current={tab === id ? 'page' : undefined}
+                // Said beside the name, not in it: the tab is still "Passwords".
+                aria-description={id === 'passwords' && attention ? t('nav.needsAttention') : undefined}
+                className={cx(
+                  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-start text-[14px] font-medium transition-colors',
+                  tab === id
+                    ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300'
+                    : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:hover:text-neutral-200',
+                )}
+              >
+                <Icon className={cx('h-[18px] w-[18px] shrink-0', tab === id ? 'text-brand-600 dark:text-brand-400' : 'text-neutral-400 dark:text-neutral-500')} />
+                {t(label)}
+                {id === 'passwords' && attention && <span className="ms-auto h-2 w-2 rounded-full bg-yellow-500" aria-hidden="true" data-testid="nav-attention" />}
+              </button>
+            ))}
+          </nav>
 
-        {/* What someone deciding whether to trust this wants to know, always in sight. */}
-        <div className="mt-auto flex flex-col gap-1.5 px-3 text-[12px] text-neutral-600 dark:text-neutral-400">
-          <p className="flex items-center gap-1.5 font-medium text-neutral-600 dark:text-neutral-300">
-            <ShieldIcon className="h-4 w-4 text-green-700 dark:text-green-300" />
-            {t('settings.encryptedHere')}
-          </p>
-          <a href={SOURCE} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-neutral-900 hover:underline dark:hover:text-neutral-200">
-            <CodeIcon className="h-4 w-4" />
-            {t('settings.source')}
-          </a>
-          <p>{t('settings.about', { version: chrome.runtime.getManifest().version_name ?? chrome.runtime.getManifest().version })}</p>
-        </div>
-      </aside>
-
-      <main key={visit} className="min-w-0 max-w-[720px] flex-1 pb-16">
-        {restored !== null && (
-          <div className="mb-6">
-            <Callout tone="info">{t('settings.restoreNew', { count: restored })}</Callout>
+          {/* What someone deciding whether to trust this wants to know, always in sight. */}
+          <div className="mt-auto flex flex-col gap-1.5 px-3 text-[12px] text-neutral-600 dark:text-neutral-400">
+            <p className="flex items-center gap-1.5 font-medium text-neutral-600 dark:text-neutral-300">
+              <ShieldIcon className="h-4 w-4 text-green-700 dark:text-green-300" />
+              {t('settings.encryptedHere')}
+            </p>
+            <a href={SOURCE} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-neutral-900 hover:underline dark:hover:text-neutral-200">
+              <CodeIcon className="h-4 w-4" />
+              {t('settings.source')}
+            </a>
+            <p>{t('settings.about', { version: chrome.runtime.getManifest().version_name ?? chrome.runtime.getManifest().version })}</p>
           </div>
-        )}
-        {tab === 'passwords' && (
-          <PasswordsPanel
-            data={status.data}
-            secret={status.secret}
-            device={status.device}
-            linked={linked}
-            view={view}
-            onView={(next) => {
-              setView(next);
-              history.replaceState(null, '', `#${next === 'all' ? 'passwords' : next === 'attention' ? 'checkup' : 'trash'}`);
-            }}
-            onBackUp={() => go('account', 'backup')}
-            onSecurity={() => go('security')}
-          />
-        )}
-        {tab === 'security' && (
-          <SecurityPanel
-            data={status.data}
-            secret={status.secret}
-            device={status.device}
-            keys={status.keys}
-            canUseDevice={canUseDevice}
-            linked={linked}
-            onRecoveryKey={setRecoveryKey}
-            showRecovery={SHOW_RECOVERY && visit === 0}
-          />
-        )}
-        {tab === 'account' && (
-          <>
-            {/* A backup job takes the page; otherwise the account, and the backups below it. */}
-            {!job && (
-              <AccountPanel account={status.account} secret={status.secret} device={status.device} keys={status.keys} onKit={(key, noPassword) => setShown({ key, kind: noPassword ? 'accountNoPassword' : 'account' })}
-                onStartedOver={setStartedOver}
-                onNewKit={async () => setNewKit((await send({ type: 'account/draftKit' })).recoveryKey)}
-              />
-            )}
-            <BackupPanel
+        </aside>
+
+        <main key={visit} className="min-w-0 max-w-[720px] flex-1 pb-16">
+          {restored !== null && (
+            <div className="mb-6">
+              <Callout tone="info">{t('settings.restoreNew', { count: restored })}</Callout>
+            </div>
+          )}
+          {tab === 'passwords' && (
+            <PasswordsPanel
+              data={status.data}
+              secret={status.secret}
+              device={status.device}
+              linked={linked}
+              view={view}
+              onView={(next) => {
+                setView(next);
+                history.replaceState(null, '', `#${next === 'all' ? 'passwords' : next === 'attention' ? 'checkup' : 'trash'}`);
+              }}
+              onBackUp={() => go('account', 'backup')}
+              onSecurity={() => go('security')}
+              opening={visit === 0 ? FILES_ITEM : null}
+            />
+          )}
+          {tab === 'security' && (
+            <SecurityPanel
               data={status.data}
               secret={status.secret}
               device={status.device}
               keys={status.keys}
-              job={job}
-              onJob={(next) => {
-                setJob(next);
-                history.replaceState(null, '', `#${next ?? 'account'}`);
-              }}
-              onNew={setRestored}
+              canUseDevice={canUseDevice}
+              linked={linked}
+              onRecoveryKey={setRecoveryKey}
+              showRecovery={SHOW_RECOVERY && visit === 0}
             />
-          </>
-        )}
-        {tab === 'family' && <FamilyPanel data={status.data} me={status.account?.accountId ?? null} passwordless={status.account?.passwordless ?? false} />}
-        {tab === 'general' && <GeneralPanel data={status.data} />}
-      </main>
-    </div>
+          )}
+          {tab === 'account' && (
+            <>
+              {/* A backup job takes the page; otherwise the account, and the backups below it. */}
+              {!job && (
+                <AccountPanel account={status.account} secret={status.secret} device={status.device} keys={status.keys} onKit={(key, noPassword) => setShown({ key, kind: noPassword ? 'accountNoPassword' : 'account' })}
+                  onStartedOver={setStartedOver}
+                  onNewKit={async () => setNewKit((await send({ type: 'account/draftKit' })).recoveryKey)}
+                />
+              )}
+              {!job && status.account && <EmergencyPanel />}
+              <BackupPanel
+                data={status.data}
+                secret={status.secret}
+                device={status.device}
+                keys={status.keys}
+                job={job}
+                onJob={(next) => {
+                  setJob(next);
+                  history.replaceState(null, '', `#${next ?? 'account'}`);
+                }}
+                onNew={setRestored}
+              />
+            </>
+          )}
+          {tab === 'send' && status.account && <SendPanel data={status.data} secret={status.secret} device={status.device} keys={status.keys} itemId={SEND_ITEM} />}
+          {tab === 'family' && <FamilyPanel data={status.data} me={status.account?.accountId ?? null} passwordless={status.account?.passwordless ?? false} />}
+          {tab === 'general' && <GeneralPanel data={status.data} />}
+        </main>
+      </div>
+    </PlanContext.Provider>
   );
 }
 

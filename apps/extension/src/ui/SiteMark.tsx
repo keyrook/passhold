@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Markup } from './svgMarkup.js';
 import { brandFor } from '@passhold/core';
 import { INK, NEUTRAL } from '@keyrook/brand';
 import { BRAND_ICONS } from './brand-icons.js';
@@ -45,8 +46,14 @@ export function Monogram({ title, size = 36 }: { title: string; size?: number })
  */
 export function SiteMark({ title, urls, size = 36 }: { title: string; urls: readonly string[]; size?: number }) {
   const brand = useMemo(() => brandFor(title, urls), [title, urls]);
-  const icon = brand ? BRAND_ICONS[brand.slug] : undefined;
-  if (!icon) return <Monogram title={title || urls[0] || ''} size={size} />;
+  return (brand && <BrandMark slug={brand.slug} size={size} />) || <Monogram title={title || urls[0] || ''} size={size} />;
+}
+
+/** A service's mark by its slug in the catalogue, as a site's is drawn; null where none is bundled. */
+export function BrandMark({ slug, size = 36 }: { slug: string; size?: number }) {
+  // Its own entries only: a slug is data, and `constructor` is no mark.
+  const icon = Object.hasOwn(BRAND_ICONS, slug) ? BRAND_ICONS[slug] : undefined;
+  if (!icon) return null;
 
   const glyph = Math.round(size * (icon.wide ? 0.82 : 0.58));
   // On a dark page a near-black mark (GitHub's, X's) would lose its edge without the faint ring.
@@ -58,8 +65,10 @@ export function SiteMark({ title, urls, size = 36 }: { title: string; urls: read
   if (icon.kind === 'color') {
     return (
       <span aria-hidden="true" className={cx(tile, ring)} style={{ width: size, height: size, background: '#FFFFFF' }}>
-        {/* Compile-time constant from the bundled sets: never input, never fetched. */}
-        <svg viewBox={icon.viewBox} width={glyph} height={glyph} color={INK} dangerouslySetInnerHTML={{ __html: icon.body }} />
+        {/* Compile-time constant from the bundled sets: never input, never fetched, and drawn as elements, never as markup. */}
+        <svg viewBox={icon.viewBox} width={glyph} height={glyph} color={INK}>
+          <Markup body={icon.body} />
+        </svg>
       </span>
     );
   }
@@ -70,7 +79,9 @@ export function SiteMark({ title, urls, size = 36 }: { title: string; urls: read
   return (
     <span aria-hidden="true" className={cx(tile, light && ring)} style={{ width: size, height: size, background: `#${hex}` }}>
       {icon.kind === 'flat' ? (
-        <svg viewBox={icon.viewBox} width={glyph} height={glyph} color={foreground} fill="currentColor" dangerouslySetInnerHTML={{ __html: icon.body }} />
+        <svg viewBox={icon.viewBox} width={glyph} height={glyph} color={foreground} fill="currentColor">
+          <Markup body={icon.body} />
+        </svg>
       ) : (
         <svg viewBox={icon.viewBox} width={glyph} height={glyph} fill={foreground}>
           <path d={icon.body} />

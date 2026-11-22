@@ -1,6 +1,8 @@
-import type { AccountPasskeyAnswer, AccountPasskeyOptions, CardNetwork, DeviceCredential, ImportedLogin, LoginDraft, PasskeyFor, PasswordName, SignInProvider, VaultData, VaultSecret, VaultPlace, VaultSettings, WalletDraft } from '@passhold/core';
+import type { SendCreated, SendRequest, SendView } from '@keyrook/account';
+import type { Attachment, AccountPasskeyAnswer, AccountPasskeyOptions, CardNetwork, DeviceCredential, EmergencyView, ShownCode, ImportedLogin, LoginDraft, LoginItem, PasskeyFor, PasswordName, SignInProvider, VaultData, VaultSecret, VaultPlace, VaultSettings, WalletDraft, WalletItem } from '@passhold/core';
 import type { Values } from '../i18n/format.js';
 import type { MessageKey } from '../i18n/locales/en.js';
+import { askAccountData, STARTS_ACCOUNT } from './platform.js';
 
 /**
  * Two kinds of caller talk to the service worker, and they are told apart by
@@ -14,6 +16,7 @@ import type { MessageKey } from '../i18n/locales/en.js';
  *   It runs in every page; whatever it may ask for, any page that compromises
  *   its renderer may ask for too.
  */
+
 
 /** What an extension page knows about the vault. */
 export type VaultStatus =
@@ -39,7 +42,31 @@ export type VaultStatus =
       device: DeviceCredential | null;
       keys: SecurityKey[];
       account: AccountView | null;
+      /** What the owner's plan holds of what is paid for (lib/plan.ts). */
+      plan: PlanView;
     };
+
+/** Of what only a paid plan holds, what this vault's owner has. */
+export interface PlanView {
+  /** Every version of an item kept, and restore offered. */
+  versions: boolean;
+  /** New files added to items; those already added open and delete on any plan. */
+  files: boolean;
+  /** The breach check offered; without it, nothing of a password is sent. */
+  breach: boolean;
+  /** Send offered: a text, files, or a copy of a login. */
+  send: boolean;
+  /** 2FA codes added beside logins, through the link with Keyrook Authenticator. */
+  codes: boolean;
+  /** Emergency access: naming a contact. Being named needs no plan. */
+  emergency: boolean;
+  /**
+   * Whether the account's server sells plans now. Until it does, a page says
+   * nothing of what the plan does not hold: no feature, and no word that it
+   * is part of Premium.
+   */
+  offered: boolean;
+}
 
 /** A security key set up to unlock the vault: what to ask it, and when it was added. */
 export interface SecurityKey {
@@ -185,45 +212,9 @@ export interface SyncResult {
  */
 export type Proof = { secret: string } | { prf: string; key?: string };
 
-/** A change to the logins, cards, addresses and notes of one place: the vault's own, or a family's shared vault. */
-export type ItemMutation =
-  | { op: 'login/add'; draft: LoginDraft }
-  | { op: 'login/update'; id: string; draft: LoginDraft }
-  | { op: 'login/favorite'; id: string; favorite: boolean }
-  | { op: 'login/trash'; id: string }
-  | { op: 'login/restore'; id: string }
-  | { op: 'login/purge'; id: string }
-  /** A card, an address or a note. */
-  | { op: 'wallet/add'; draft: WalletDraft }
-  | { op: 'wallet/update'; id: string; draft: WalletDraft }
-  | { op: 'wallet/favorite'; id: string; favorite: boolean }
-  | { op: 'wallet/trash'; id: string }
-  | { op: 'wallet/restore'; id: string }
-  | { op: 'wallet/purge'; id: string }
-  | { op: 'trash/empty' };
-
-/**
- * Pages describe a change; the service worker applies it inside its
- * serialised turn, seals and stores the result, and tells every page.
- */
-export type Mutation =
-  | ItemMutation
-  /** What a file from another manager held: its logins with their passkeys, passkeys for logins already here, its cards, addresses and notes. */
-  | { op: 'import'; logins: ImportedLogin[]; passkeys: PasskeyFor[]; wallet: WalletDraft[] }
-  /** A folder renamed, or taken away with `to` empty: what was in it stays. */
-  | { op: 'folder/rename'; from: string; to: string }
-  /** A change to a family's shared vault, as `ItemMutation` is to the vault's own; emptying its trash, or one item out of it, is an organiser's. */
-  | { op: 'family/change'; place: VaultPlace; change: ItemMutation }
-  /** An item of the vault's own moved into a shared vault, which takes it under a new id. */
-  | { op: 'family/move'; id: string; place: VaultPlace }
-  /** Its owner has read that someone is no longer in the family. */
-  | { op: 'family/departureRead'; orgId: string; accountId: string }
-  | { op: 'settings/update'; patch: Partial<VaultSettings> }
-  | { op: 'neverSave/remove'; site: string }
-  /** Its owner has put the recovery key away. */
-  | { op: 'recovery/saved' }
-  /** Its owner has put the account's recovery key away. */
-  | { op: 'account/kitSaved' };
+/** What a page may ask to change, and how it is applied: shared with the web vault's worker (`@passhold/core`, vault/mutation.ts). */
+export type { ItemMutation, Mutation } from '@passhold/core';
+import type { Mutation } from '@passhold/core';
 
 /** The field the inline list was opened from: a sign-in's, a new password's, a payment card's or an address's. */
 export type FieldKind = 'login' | 'new' | 'card' | 'address';
@@ -358,6 +349,12 @@ export type Request =
   | { type: 'account/joinKitSaved' }
   /** Where this tab goes to sign in with Google or GitHub. */
   | { type: 'provider/start'; provider: SignInProvider }
+  /**
+   * The answer to that sign-in, from the browser's own sign-in window (Firefox,
+   * where no page can hand it over): the fragment the window ended at. Taken
+   * as the page's message is: only if its state is the one this browser sent.
+   */
+  | { type: 'provider/answer'; answer: string }
   | { type: 'provider/view' }
   /** Make the account the provider's identity has none of; its recovery key comes back. */
   | { type: 'provider/create' }
@@ -434,9 +431,46 @@ export type Request =
   | { type: 'family/trust'; orgId: string; accountId: string; memberKey: string }
   /** The account's password, once, so this browser takes its key to the family; never sent. */
   | { type: 'family/unlock'; orgId: string; password: string }
+  /** The 2FA codes the link with Keyrook Authenticator holds for a login: what each shows now, never its secret. */
+  | { type: 'codes/forLogin'; id: string }
+  /** A code for a login, from the setup key a site shows or its QR code's address, written into the link. */
+  | { type: 'codes/add'; id: string; setup: string }
+  /** A Send of a copy of a login, its link shown once: plain text out of the vault, so it asks for proof. */
+  | { type: 'send/create'; itemId: string; proof?: Proof; labels?: { username: string; password: string; website: string; notes: string }; opens: number; lifetime: number; password?: string }
+  /**
+   * A Send of typed text and files, made by the page that read them, which
+   * seals them and moves the bytes (ui/send.ts): the sealed Send put on the
+   * server, with each file's sealed size, and where to put each
+   * (`send/begin`); every file in place (`send/finish`); or taken down again
+   * (`send/cancel`). The link is the page's alone, to show once.
+   */
+  | { type: 'send/begin'; send: SendRequest }
+  | { type: 'send/finish'; id: string }
+  | { type: 'send/cancel'; id: string }
+  /** The breach check: each login whose password was seen in a breach. Only the start of each hash leaves. */
+  | { type: 'checkup/breach' }
+  /** Emergency access, either side, with the code to compare where it is not compared yet. */
+  | { type: 'emergency/view' }
+  /** The code matched, as its owner saw it on both screens. */
+  | { type: 'emergency/trust'; grantId: string }
+  /** A grantor's vault, once access opened: to read only. */
+  | { type: 'emergency/read'; grantId: string }
+  /**
+   * A file added to an item, as the page that read it moves the bytes: room
+   * for it in the account, sealed `size` bytes under the id the account's
+   * flow drew (`files/begin`); the store holds it (`files/finish`), or it is
+   * given up (`files/cancel`); then the item names it, with the key the page
+   * sealed it under (`files/attach`). The session stays here.
+   */
+  | { type: 'files/begin'; itemId: string; id: string; size: number }
+  | { type: 'files/finish'; id: string }
+  | { type: 'files/cancel'; id: string }
+  | { type: 'files/attach'; id: string; key: string; name: string; fileType: string; size: number }
+  /** Where to read a file an item names, for the next few minutes, and the key for that one file: for a page to fetch and open it. */
+  | { type: 'files/open'; itemId: string; fileId: string }
   | { type: 'vault/mutate'; mutation: Mutation }
-  /** Plain text out: asks for proof, even unlocked. */
-  | { type: 'vault/exportCsv'; proof: Proof }
+  /** Plain text out: asks for proof, even unlocked. The logins, in the columns every browser reads; or, `apikey`, the API keys in Passhold's own. */
+  | { type: 'vault/exportCsv'; proof: Proof; kind?: 'apikey' }
   /** The vault file as it is, sealed under its secret. Asks for proof. */
   | { type: 'vault/backup'; proof: Proof }
   /** With no vault here, the backup becomes it; with one, its logins are added and nothing is removed. */
@@ -461,12 +495,41 @@ export type Request =
   /** The frame's card is this tall: the frame follows. */
   | { type: 'passkey/size'; token: string; height: number }
   | { type: 'prompt/view'; token: string }
+  /** The prompt's card measured: its frame covers no more of the page than that. */
+  | { type: 'prompt/size'; token: string; height: number }
   | { type: 'prompt/answer'; token: string; answer: 'save' | 'never' | 'dismiss' }
   | { type: 'pending/view' }
   | { type: 'pending/answer'; id: string; answer: 'save' | 'never' | 'dismiss' }
   | { type: 'clipboard/copied' }
   /** A person clicked or typed in one of Passhold's pages: the idle lock starts again. */
   | { type: 'activity' };
+
+/** A login's 2FA codes: `off` until the link is turned on on the account page, `premium` while the plan does not hold it, `none` with no account. */
+export type CodesView = { status: 'open'; codes: ShownCode[] } | { status: 'off' | 'premium' | 'none' };
+
+/** A Send made: its link, to show this once, and what it allows. */
+export interface SentView {
+  url: string;
+  opensLeft: number;
+  expiresAt: number;
+}
+
+/** A file an item names, for a page to fetch and open: where, for a few minutes, and what opens that one file. */
+export interface OpenedFile {
+  url: string;
+  expiresAt: number;
+  file: Attachment;
+}
+
+/**
+ * A grantor's vault as their emergency contact reads it: every live item of
+ * every kind, read only — without a passkey's private key, which never
+ * reaches a page, or the versions and files that would be asked of this
+ * account's own vault.
+ */
+export type EmergencyRead =
+  | { status: 'compare' | 'nothing' }
+  | { status: 'open'; items: LoginItem[]; wallet: WalletItem[] };
 
 export type ResponseFor<R extends Request> = R extends {
   type: 'vault/status' | 'vault/create' | 'vault/unlock' | 'vault/unlockPin' | 'vault/unlockDevice';
@@ -488,6 +551,24 @@ export type ResponseFor<R extends Request> = R extends {
                 ? SyncResult
                 : R extends { type: 'family/compareCode' }
                   ? { code: string }
+                : R extends { type: 'codes/forLogin' | 'codes/add' }
+                  ? CodesView
+                : R extends { type: 'send/create' }
+                  ? SentView
+                : R extends { type: 'send/begin' }
+                  ? SendCreated
+                : R extends { type: 'send/finish' }
+                  ? SendView
+                : R extends { type: 'files/begin' }
+                  ? { url: string; expiresAt: number }
+                : R extends { type: 'files/open' }
+                  ? OpenedFile
+                : R extends { type: 'checkup/breach' }
+                  ? { exposed: { id: string; count: number }[] }
+                : R extends { type: 'emergency/view' }
+                  ? EmergencyView | { status: 'none' }
+                : R extends { type: 'emergency/read' }
+                  ? EmergencyRead
                 : R extends { type: 'account/recover' }
                   ? { email: string; joined: boolean }
                   : R extends { type: 'account/startOver' }
@@ -508,7 +589,9 @@ export type ResponseFor<R extends Request> = R extends {
                     ? SyncResult
               : R extends { type: 'account/draftKit' | 'account/showKit' }
                 ? { recoveryKey: string }
-                : R extends { type: 'account/join' }
+                : R extends { type: 'provider/answer' }
+                  ? boolean
+                  : R extends { type: 'account/join' }
                   ? { email: string; recoveryKey: string | null }
                   : R extends { type: 'provider/start' | 'provider/makeRoot' }
                     ? { url: string }
@@ -567,10 +650,28 @@ export type ContentRequest =
   | { type: 'content/openMenu'; field: FieldKind; auto?: boolean; inTop?: FieldRect & { word: string } }
   /** The list this frame had drawn in the top frame is no longer wanted. */
   | { type: 'content/closeMenu' }
-  | { type: 'content/offerSave'; username: string; password: string }
+  /**
+   * A sign-in sent. `current`: in a form that changes a password, the one it
+   * held until now, which names the login being changed. Nothing is offered
+   * yet: a sign-in sent is not a sign-in that worked (`content/signInSettled`).
+   */
+  | { type: 'content/offerSave'; username: string; password: string; current?: string }
+  /**
+   * What became of the sign-in this frame sent: `through` when its password
+   * field went away, as a form does once it is done with; not, when it is still
+   * there a while later — a wrong password, most likely, not one to keep.
+   */
+  | { type: 'content/signInSettled'; through: boolean }
+  /** A sign-in's first step sent: a username alone, its password asked for on the next page. */
+  | { type: 'content/firstStep'; username: string }
   /** A checkout sent: the card in its card fields, the address in its address fields, as typed — the page's word, read as such. */
   | { type: 'content/offerWallet'; card: CardFill | null; address: SentAddress | null }
-  | { type: 'content/checkPrompt' }
+  /**
+   * A document loaded, asking whether a save waits to be offered.
+   * `signInForm`: it shows a password field — the page a sign-in that did
+   * not work comes back to.
+   */
+  | { type: 'content/checkPrompt'; signInForm: boolean }
   /**
    * A website asking for a passkey (`navigator.credentials`), passed on as the
    * page wrote it: `id` is the page's own name for the request, `options` the
@@ -615,6 +716,7 @@ export interface ContentHello {
 /** A field's place in its own frame. */
 export interface FieldRect {
   left: number;
+  right: number;
   top: number;
   bottom: number;
 }
@@ -676,6 +778,14 @@ export type ToContent =
   /** A passkey request settled: `id` is the page's name for it. */
   | { type: 'ph/webauthn'; id: string; outcome: WebAuthnOutcome }
   | { type: 'ph/passkeySize'; id: string; height: number }
+  /** Top frame only: the save prompt's card measured this tall. */
+  | { type: 'ph/promptSize'; height: number }
+  /**
+   * A sign-in sent in this tab waits to be judged: the frame says, as when it
+   * loaded, whether it shows a sign-in form (`content/checkPrompt`). For a
+   * page that loaded and asked before the sign-in that led to it was held.
+   */
+  | { type: 'ph/askPrompt' }
   /** Top frame only: check in (`content/here`), so the service worker learns from Chrome where this frame is. */
   | { type: 'ph/checkIn'; nonce: string };
 
@@ -699,11 +809,20 @@ export interface SenderIdentity {
  *
  * `id` alone is not enough: the content script carries the extension's id
  * too, from inside every web page. The origin is what tells them apart — an
- * extension page reports `chrome-extension://<id>`, a content script the
- * page's own.
+ * extension page reports the extension's own, a content script the page's.
+ *
+ * `ownOrigin`: where the extension's pages are (`ownOrigin()`). In Chrome
+ * that is `chrome-extension://<id>`; in Firefox the id is the add-on's name
+ * and the origin an address drawn at install, so it is asked of the browser,
+ * never made from the id.
  */
-export function isTrustedSender(sender: SenderIdentity, runtimeId: string): boolean {
-  return sender.id === runtimeId && sender.origin === `chrome-extension://${runtimeId}`;
+export function isTrustedSender(sender: SenderIdentity, runtimeId: string, own: string = `chrome-extension://${runtimeId}`): boolean {
+  return sender.id === runtimeId && sender.origin === own;
+}
+
+/** The origin of the extension's own pages, as the browser gives it: nothing a page or a message says. */
+export function ownOrigin(): string {
+  return new URL(chrome.runtime.getURL('')).origin;
 }
 
 /** Whether a message comes from our content script, in some web page. */
@@ -727,19 +846,50 @@ export class BackgroundError extends Error {
   }
 }
 
+/**
+ * How a page reaches whatever holds the vault. In the extension that is the
+ * service worker, by Chrome's messages; in the web vault it is the worker the
+ * page started (`useTransport`), which answers the same requests the screens
+ * the two share send.
+ */
+export interface Transport {
+  send(request: Request): Promise<Envelope<unknown> | undefined>;
+  onChanged(handler: () => void): () => void;
+}
+
+const extensionTransport: Transport = {
+  async send(request) {
+    // Firefox asks its owner before the account's data is sent; said no, the request never leaves the page.
+    if (STARTS_ACCOUNT.has(request.type) && !(await askAccountData())) {
+      return { ok: false, error: 'The account’s data may not be sent.', key: 'error.accountFailed' };
+    }
+    return (await chrome.runtime.sendMessage(request)) as Envelope<unknown> | undefined;
+  },
+  onChanged(handler) {
+    const listener = (message: unknown) => {
+      if (typeof message === 'object' && message !== null && (message as { type?: string }).type === VAULT_CHANGED) {
+        handler();
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  },
+};
+
+let transport: Transport = extensionTransport;
+
+/** The web vault's page, before its first render: its requests go to its own worker. */
+export function useTransport(next: Transport): void {
+  transport = next;
+}
+
 export async function send<R extends Request>(request: R): Promise<ResponseFor<R>> {
-  const response = (await chrome.runtime.sendMessage(request)) as Envelope<ResponseFor<R>> | undefined;
+  const response = (await transport.send(request)) as Envelope<ResponseFor<R>> | undefined;
   if (!response) throw new BackgroundError('No response from the service worker.', 'error.noWorker');
   if (!response.ok) throw new BackgroundError(response.error, response.key, response.values);
   return response.value;
 }
 
 export function onVaultChanged(handler: () => void): () => void {
-  const listener = (message: unknown) => {
-    if (typeof message === 'object' && message !== null && (message as { type?: string }).type === VAULT_CHANGED) {
-      handler();
-    }
-  };
-  chrome.runtime.onMessage.addListener(listener);
-  return () => chrome.runtime.onMessage.removeListener(listener);
+  return transport.onChanged(handler);
 }

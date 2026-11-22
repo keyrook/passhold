@@ -1,7 +1,6 @@
 /**
- * The account page's flows: what account.keyrook.com does
- * with the password and the recovery key, which it holds only while one of
- * these runs.
+ * The account page's flows: what account.keyrook.com does with the password
+ * and the recovery key, which it holds only while one of these runs.
  *
  * The page's code is sent by a server each time it opens, so everything here
  * is written to be held to account: each flow asks for what it needs again,
@@ -48,6 +47,7 @@ import {
   register,
   secondStepPasskeyOptions,
   startOver,
+  SyncHttpError,
 } from '../sync/http.js';
 import type {
   OrgBox,
@@ -66,19 +66,42 @@ import type {
   SecondStepBegun,
   SecondStepProof,
   SecondStepRequired,
+  EmergencyGrant,
+  EmergencyState,
+  OrgCollection,
+  LinkState,
 } from '../sync/protocol.js';
 import { deriveKeyCheck, deriveRecoveryAuthHash } from '../sync/recovery.js';
+import { linkIdOf, newLinkKey, sealLinkKey } from '../keys/link.js';
+import {
+  newWriteKey,
+  openCollectionGeneration,
+  openCollectionMembersOf,
+  sealCollectionGeneration,
+  sealCollectionMembers,
+  type HeldGeneration,
+} from '../keys/org/access.js';
 import { newOrgKey, openOrgKey, sealOrgKey, type AuthBox } from '../keys/org/authbox.js';
 import {
   newCollectionKey,
-  openCollectionKey,
   openCollectionName,
-  sealCollectionHolders,
-  sealCollectionKey,
   sealCollectionName,
-  sealedHoldersOf,
 } from '../keys/org/collection.js';
 import { orgCompareCode, orgJoinCode } from '../keys/org/confirm.js';
+import {
+  contactCode,
+  newContactKey,
+  openContactKeyWithProduct,
+  openContactKeyWithRoot,
+  openContactPin,
+  sealContactKeyToRoot,
+  sealContactKeyUnderProduct,
+  sealContactPin,
+  sealEmergencyKey,
+  type ContactKey,
+  type ContactPin,
+  type ContactRootBox,
+} from '../keys/contact.js';
 import {
   newMemberKey,
   openMemberKeyWithProduct,
@@ -105,7 +128,6 @@ import {
   type RosterMember,
 } from '../keys/org/roster.js';
 import { vouchedFor, vouchFor } from '../keys/org/vouch.js';
-import { sealEmergencyBox } from '../keys/org/emergency.js';
 import {
   newHandoverKey,
   newOrgRecoveryKey,
@@ -118,6 +140,7 @@ import {
   sealRecoveryHandover,
   type OrgRecoveryKey,
 } from '../keys/org/recovery.js';
+import { familyProducts } from '../products.js';
 import { newId } from '../util/id.js';
 import { passkeyCredential, signInWithPasskey, type PasskeyAnswer, type PasskeyTouch } from './passkey.js';
 import { passwordKeys, type AccountServer } from './product-key.js';
@@ -135,9 +158,9 @@ export type ConsoleProof =
   | { passkey: PasskeyTouch };
 
 /**
- * The second step, on an account that has one: the
- * code the person's authenticator app shows, or their recovery key in its
- * place. A passkey needs none.
+ * The second step, on an account that has one: the code the person's
+ * authenticator app shows, or their recovery key in its place. A passkey needs
+ * none.
  */
 export type SecondStepAnswer = { code: string } | { recoveryKey: string };
 
@@ -352,7 +375,8 @@ export async function consoleLinkProvider(
 }
 
 /**
- * Asks for a code at the address the account would move to, on the owner's proof. Nothing opens: the address carries no key.
+ * Asks for a code at the address the account would move to, on the owner's
+ * proof. Nothing opens: the address carries no key.
  */
 export async function consoleBeginEmailChange(
   api: HttpSyncAdapter,
@@ -818,8 +842,8 @@ export async function consoleSetUpRoot(
  * opens the root (`root`); with Keyrook Authenticator's key from its wrap
  * under the password, on an account where the root holds none (`password`);
  * or not at all (`none`) — the page's own sessions, a product whose key the
- * page cannot open, and a device listed without its id by an older server. Without a proof the device is only signed out, and
- * keeps what it holds.
+ * page cannot open, and a device listed without its id by an older server.
+ * Without a proof the device is only signed out, and keeps what it holds.
  */
 export function consoleRemovalProof(held: ConsoleKeysResponse, device: Pick<DeviceSummary, 'product' | 'deviceId'>): 'root' | 'password' | 'none' {
   const { product } = device;
@@ -892,7 +916,7 @@ async function opened<T>(open: () => Promise<T>, proof: RemovalProof): Promise<T
   }
 }
 
-// --- Families ------------------------------------------
+// --- Families ---------------------------------------------------------------
 //
 // Each opens the root with what the person typed or touched, then the member
 // key sealed to it, then what that opens, and drops all of it when it
@@ -904,9 +928,6 @@ async function opened<T>(open: () => Promise<T>, proof: RemovalProof): Promise<T
 // taken only from someone pinned with the key its box is from, and nothing is
 // sealed to or taken from someone whose key changed, until the two compare a
 // code (`familyCompareOf`, `consoleTrustFamilyMember`).
-
-/** The product a family's first shared collection belongs to: a Passhold vault. */
-export const FAMILY_COLLECTION_PRODUCT = 'passhold';
 
 /** Seals `member` to the root and under each product's key the root opens, for those products' devices. */
 async function memberBoxes(held: Held, root: AccountRoot, member: MemberKey, orgId: string) {
@@ -922,7 +943,7 @@ async function memberBoxes(held: Held, root: AccountRoot, member: MemberKey, org
 interface OpenedFamily {
   accountId: string;
   held: Held;
-  /** The caller's own root, opened with what they typed: what emergency access hands over. */
+  /** The caller's own root, opened with what they typed. */
   root: AccountRoot;
   detail: OrgDetail;
   member: MemberKey;
@@ -1160,42 +1181,70 @@ async function openFamily(api: HttpSyncAdapter, server: ConsoleAt, orgId: string
  * from someone gone opens as from the key the pin kept for them, as a
  * product's does; from someone the pin never had, it is not taken.
  */
-async function openHeldCollection(family: OpenedFamily, collectionId: string): Promise<{ key: CryptoKey; generation: number } | null> {
+async function openHeldCollection(family: OpenedFamily, collectionId: string): Promise<(HeldGeneration & { generation: number }) | null> {
   const collection = family.detail.collections.find((entry) => entry.id === collectionId);
   const box = collection && family.detail.me.collectionKeyBoxes.find((entry) => entry.collectionId === collectionId && entry.generation === collection.generation);
   if (!collection || !box) return null;
-  const listed = family.roster.body.members.some((line) => line.accountId === box.senderId);
+  const listed = family.roster.body.members.find((line) => line.accountId === box.senderId);
   const senderKey = listed ? await memberKeyIn(family, box.senderId) : collectionSenderKey(family.pin, box.senderId, collectionId, collection.generation);
   if (!senderKey) return null;
-  const key = await openCollectionKey(
+  // A write key is taken only from an organiser, or from the caller's own hand.
+  const trusted = box.senderId === family.accountId || listed?.role === 'owner';
+  const held = await openCollectionGeneration(
     boxFrom<AuthBox>(box.box),
     { recipient: family.member, recipientId: family.accountId, senderKey, senderId: box.senderId },
     { orgId: family.detail.org.id, collectionId, generation: collection.generation },
+    trusted,
   );
-  return { key, generation: collection.generation };
+  if (!held) {
+    if (!trusted) return null;
+    throw new DecryptionError();
+  }
+  return { ...held, generation: collection.generation };
 }
 
-/** A new collection of `product`, its key sealed from the caller to each of `memberIds`, whose keys come from the roster. */
-async function createCollectionIn(api: HttpSyncAdapter, family: OpenedFamily, input: { name: string; product: string; memberIds: string[] }): Promise<OrgDetail> {
+/** Whether `accountId` is an organiser by the roster, who may always edit. */
+const organiserIn = (family: OpenedFamily, accountId: string) => family.roster.body.members.some((line) => line.accountId === accountId && line.role === 'owner');
+
+/**
+ * A new collection of `product`, its key sealed from the caller to each of
+ * `memberIds`, whose keys come from the roster. With `viewers`, view only is
+ * on: a write key, its private half to all but those named, none of whom may
+ * be an organiser.
+ */
+async function createCollectionIn(
+  api: HttpSyncAdapter,
+  family: OpenedFamily,
+  input: { name: string; product: string; memberIds: string[]; viewers?: string[] },
+): Promise<OrgDetail> {
   const orgId = family.detail.org.id;
   const collectionId = newId();
   const place = { orgId, collectionId, generation: 1 };
-  const key = await newCollectionKey();
   const holders = [...new Set([family.accountId, ...input.memberIds])];
+  const viewers = input.viewers === undefined ? null : [...new Set(input.viewers)];
+  if (viewers?.some((id) => !holders.includes(id) || organiserIn(family, id))) throw new Error('An organiser can always edit, and only someone let into a vault can be set to view it.');
+  const held: HeldGeneration = { key: await newCollectionKey(), write: viewers ? await newWriteKey() : null };
   const keyBoxes = [];
   for (const accountId of holders) {
     const from = { sender: family.member, senderId: family.accountId, recipientKey: await memberKeyIn(family, accountId), recipientId: accountId };
-    keyBoxes.push({ accountId, box: wire(await sealCollectionKey(key, from, place)) });
+    keyBoxes.push({ accountId, box: wire(await sealCollectionGeneration(held, from, place, !viewers?.includes(accountId))) });
   }
-  const nameBox = wire(await sealCollectionName(key, input.name, place));
-  return api.createCollection(orgId, { id: collectionId, product: input.product, nameBox, holdersBox: wire(await sealCollectionHolders(key, holders, place)), keyBoxes });
+  const nameBox = wire(await sealCollectionName(held.key, input.name, place));
+  return api.createCollection(orgId, {
+    id: collectionId,
+    product: input.product,
+    nameBox,
+    holdersBox: wire(await sealCollectionMembers(held, holders, place, viewers ?? [])),
+    keyBoxes,
+    ...(viewers ? { viewers: viewers.sort() } : {}),
+  });
 }
 
 /**
  * Makes a family, its maker its organiser: a member key, the family key and
- * the first roster, then its first shared collection, a Passhold vault named
- * `collectionName`, in the page's own words. Returns the family as its maker
- * sees it.
+ * the first roster, then its first shared collection, of the first product
+ * families share (`familyProducts`), named `collectionName`, in the page's own
+ * words. Returns the family as its maker sees it.
  */
 export async function consoleCreateFamily(
   api: HttpSyncAdapter,
@@ -1220,7 +1269,7 @@ export async function consoleCreateFamily(
   const pin = nextOrgPin(null, checked);
   await keepPin(api, server, { accountId: me, root, orgId }, pin);
   const family: OpenedFamily = { accountId: me, held, root, detail, member, orgKey, roster: checked, keyChanged: [], pin };
-  return createCollectionIn(api, family, { name: input.collectionName, product: FAMILY_COLLECTION_PRODUCT, memberIds: [] });
+  return createCollectionIn(api, family, { name: input.collectionName, product: familyProducts[0]!, memberIds: [] });
 }
 
 /** The code each organiser's screen shows the newcomer, made from the newcomer's own key, never from what the server says it is. */
@@ -1277,7 +1326,15 @@ export type JoinComparison = 'match' | 'without-comparing' | 'cancel';
 export async function consoleConfirmMember(
   api: HttpSyncAdapter,
   server: ConsoleAt,
-  input: { orgId: string; accountId: string; proof: ConsoleProof; compare: (code: string) => Promise<JoinComparison>; collectionIds?: string[] },
+  input: {
+    orgId: string;
+    accountId: string;
+    proof: ConsoleProof;
+    compare: (code: string) => Promise<JoinComparison>;
+    collectionIds?: string[];
+    /** Of the collections with view only on, those the newcomer may only view. */
+    viewOnlyIn?: string[];
+  },
 ): Promise<OrgDetail | null> {
   const family = await openFamily(api, server, input.orgId, input.proof);
   const { detail, member, orgKey, roster } = family;
@@ -1305,12 +1362,18 @@ export async function consoleConfirmMember(
     const held = await openHeldCollection(family, collection.id);
     if (!held) continue;
     const place = { orgId: input.orgId, collectionId: collection.id, generation: held.generation };
-    const holders = await sealedHoldersOf(held.key, input.orgId, collection);
+    const members = await openCollectionMembersOf(held, input.orgId, collection);
+    // Where view only is on, nobody is let in without a signed list to add them to.
+    if (held.write && !members) continue;
+    const viewer = held.write !== null && newcomer.role !== 'owner' && (input.viewOnlyIn ?? []).includes(collection.id);
     collectionKeyBoxes.push({
       collectionId: collection.id,
       generation: held.generation,
-      box: wire(await sealCollectionKey(held.key, from, place)),
-      ...(holders ? { holdersBox: wire(await sealCollectionHolders(held.key, [...holders, newcomer.accountId], place)) } : {}),
+      box: wire(await sealCollectionGeneration(held, from, place, !viewer)),
+      ...(members
+        ? { holdersBox: wire(await sealCollectionMembers(held, [...members.holders, newcomer.accountId], place, viewer ? [...members.viewers, newcomer.accountId] : members.viewers)) }
+        : {}),
+      ...(viewer ? { viewer: true } : {}),
     });
   }
   // Invited as an organiser: the recovery key in use too, or they could not help.
@@ -1436,22 +1499,18 @@ async function nextCollectionKeys(family: OpenedFamily): Promise<RotateOrgReques
   const orgId = family.detail.org.id;
   const confirmed = new Set(family.detail.members.filter((entry) => entry.status === 'confirmed').map((entry) => entry.accountId));
   const collections = [];
+  const organiser = organiserIn(family, family.accountId);
   for (const collection of family.detail.collections) {
     if (!collection.rotationDue) continue;
     const held = await openHeldCollection(family, collection.id);
     if (!held) continue;
-    const holders = (await sealedHoldersOf(held.key, orgId, collection))?.filter((accountId) => confirmed.has(accountId)) ?? [];
+    // A view only collection's next write key comes from an organiser alone: nobody else's would be taken.
+    if (held.write && !organiser) continue;
+    const members = await openCollectionMembersOf(held, orgId, collection);
+    const holders = members?.holders.filter((accountId) => confirmed.has(accountId)) ?? [];
     if (holders.length === 0) continue;
-    const name = await openCollectionName(held.key, boxFrom<SealedBox>(collection.nameBox), { orgId, collectionId: collection.id, generation: held.generation });
-    const place = { orgId, collectionId: collection.id, generation: held.generation + 1 };
-    const key = await newCollectionKey();
-    const keyBoxes = [];
-    for (const accountId of holders) {
-      const from = { sender: family.member, senderId: family.accountId, recipientKey: await memberKeyIn(family, accountId), recipientId: accountId };
-      keyBoxes.push({ accountId, box: wire(await sealCollectionKey(key, from, place)) });
-    }
-    const nameBox = wire(await sealCollectionName(key, name, place));
-    collections.push({ collectionId: collection.id, generation: place.generation, nameBox, holdersBox: wire(await sealCollectionHolders(key, holders, place)), keyBoxes });
+    const viewers = held.write ? members!.viewers.filter((accountId) => holders.includes(accountId)) : null;
+    collections.push(await nextGeneration(family, collection, held, holders, viewers));
   }
   return collections;
 }
@@ -1467,6 +1526,110 @@ async function rotateMarkedCollections(api: HttpSyncAdapter, family: OpenedFamil
   let detail = family.detail;
   for (const { collectionId, ...next } of await nextCollectionKeys(family)) detail = await api.rotateCollection(detail.org.id, collectionId, next);
   return detail;
+}
+
+/**
+ * The next generation of a collection, from the caller to each of `holders`:
+ * a new key, its name sealed again, who holds it, and where `viewers` is
+ * given, a new write key, its private half to all but them.
+ */
+async function nextGeneration(
+  family: OpenedFamily,
+  collection: OrgCollection,
+  held: HeldGeneration & { generation: number },
+  holders: string[],
+  viewers: string[] | null,
+): Promise<RotateOrgRequest['collections'][number]> {
+  const orgId = family.detail.org.id;
+  const name = await openCollectionName(held.key, boxFrom<SealedBox>(collection.nameBox), { orgId, collectionId: collection.id, generation: held.generation });
+  const place = { orgId, collectionId: collection.id, generation: held.generation + 1 };
+  const next: HeldGeneration = { key: await newCollectionKey(), write: viewers ? await newWriteKey() : null };
+  const keyBoxes = [];
+  for (const accountId of holders) {
+    const from = { sender: family.member, senderId: family.accountId, recipientKey: await memberKeyIn(family, accountId), recipientId: accountId };
+    keyBoxes.push({ accountId, box: wire(await sealCollectionGeneration(next, from, place, !viewers?.includes(accountId))) });
+  }
+  return {
+    collectionId: collection.id,
+    generation: place.generation,
+    nameBox: wire(await sealCollectionName(next.key, name, place)),
+    holdersBox: wire(await sealCollectionMembers(next, holders, place, viewers ?? [])),
+    keyBoxes,
+    ...(viewers ? { viewers: [...viewers].sort() } : {}),
+  };
+}
+
+/**
+ * The view only vaults whose keys in use came to someone from another
+ * organiser, given their next keys from this one: the same people, the same
+ * viewers. Done before that organiser steps down, whose boxes would be taken
+ * no more after. Returns the family as it is after.
+ */
+export async function consoleRenewViewOnlyVaults(api: HttpSyncAdapter, server: ConsoleAt, input: { orgId: string; proof: ConsoleProof }): Promise<OrgDetail> {
+  const family = await openFamily(api, server, input.orgId, input.proof);
+  if (!organiserIn(family, family.accountId)) throw new Error('Only an organiser of this family can do that.');
+  const confirmed = new Set(family.detail.members.filter((entry) => entry.status === 'confirmed').map((entry) => entry.accountId));
+  let detail = family.detail;
+  for (const collection of family.detail.collections) {
+    if (!collection.viewOnly || collection.rotationDue) continue;
+    const held = await openHeldCollection(family, collection.id);
+    if (!held?.write) continue;
+    const members = await openCollectionMembersOf(held, input.orgId, collection);
+    if (!members) continue;
+    const holders = members.holders.filter((id) => confirmed.has(id));
+    const { collectionId, ...next } = await nextGeneration(family, collection, held, holders, members.viewers.filter((id) => holders.includes(id)));
+    detail = await api.rotateCollection(input.orgId, collectionId, next);
+  }
+  return detail;
+}
+
+/**
+ * An organiser lets someone in a collection edit it, or only view it.
+ *
+ * - **To edit:** an access box of the key in use with the write key's private
+ *   half, and who holds it again, them no longer a viewer. Nothing changes
+ *   for anyone else.
+ * - **To view only:** the next generation, as letting someone out is: a new
+ *   key and a new write key to everyone in it, the private half to all but
+ *   them and those viewing already. What they wrote before stays, readable
+ *   under the generation it was written in. The first viewer turns view only
+ *   on, and it stays on.
+ *
+ * An organiser may always edit, and is never made a viewer. Returns the
+ * family as it is after, unchanged where there was nothing to do.
+ */
+export async function consoleSetCollectionAccess(
+  api: HttpSyncAdapter,
+  server: ConsoleAt,
+  input: { orgId: string; collectionId: string; accountId: string; access: 'view' | 'edit'; proof: ConsoleProof },
+): Promise<OrgDetail> {
+  const family = await openFamily(api, server, input.orgId, input.proof);
+  if (!organiserIn(family, family.accountId)) throw new Error('Only an organiser of this family can do that.');
+  const collection = family.detail.collections.find((entry) => entry.id === input.collectionId);
+  if (!collection) throw new Error('There is no such collection in this family.');
+  if (collection.rotationDue) throw new Error('Someone who held this collection’s key is gone, and it must be changed first. Load the family again.');
+  const held = await openHeldCollection(family, collection.id);
+  if (!held) throw new Error('You do not hold this vault’s key.');
+  const members = await openCollectionMembersOf(held, input.orgId, collection);
+  if (!members) throw new Error('This vault’s list of who is in it does not open. Load the family again.');
+  if (!members.holders.includes(input.accountId)) throw new Error('They are not in this vault.');
+  const viewing = held.write ? members.viewers : [];
+  if (input.access === 'edit') {
+    if (!held.write || !viewing.includes(input.accountId)) return family.detail;
+    const place = { orgId: input.orgId, collectionId: collection.id, generation: held.generation };
+    const from = { sender: family.member, senderId: family.accountId, recipientKey: await memberKeyIn(family, input.accountId), recipientId: input.accountId };
+    return api.collectionEditor(input.orgId, collection.id, input.accountId, {
+      generation: held.generation,
+      box: wire(await sealCollectionGeneration(held, from, place, true)),
+      holdersBox: wire(await sealCollectionMembers(held, members.holders, place, viewing.filter((id) => id !== input.accountId))),
+    });
+  }
+  if (organiserIn(family, input.accountId)) throw new Error('An organiser can always edit, and only someone let into a vault can be set to view it.');
+  if (held.write && viewing.includes(input.accountId)) return family.detail;
+  const confirmed = new Set(family.detail.members.filter((entry) => entry.status === 'confirmed').map((entry) => entry.accountId));
+  const holders = members.holders.filter((id) => confirmed.has(id));
+  const { collectionId, ...next } = await nextGeneration(family, collection, held, holders, [...viewing.filter((id) => holders.includes(id)), input.accountId]);
+  return api.rotateCollection(input.orgId, collectionId, next);
 }
 
 /**
@@ -1562,7 +1725,7 @@ export async function consoleSetFamilyRole(
 export async function consoleCreateCollection(
   api: HttpSyncAdapter,
   server: ConsoleAt,
-  input: { orgId: string; name: string; product: string; memberIds: string[]; proof: ConsoleProof },
+  input: { orgId: string; name: string; product: string; memberIds: string[]; proof: ConsoleProof; viewers?: string[] },
 ): Promise<OrgDetail> {
   return createCollectionIn(api, await openFamily(api, server, input.orgId, input.proof), input);
 }
@@ -1579,27 +1742,7 @@ export async function consoleCollectionNames(api: HttpSyncAdapter, server: Conso
   return names;
 }
 
-/**
- * Names the caller's emergency contact: their root, sealed to the contact's
- * member key from the roster, in a box from their own. Only someone the
- * roster marks as verified: the contact's key was compared when they joined,
- * so the box goes to the person, not to a key the server chose.
- */
-export async function consoleSetEmergency(
-  api: HttpSyncAdapter,
-  server: ConsoleAt,
-  input: { orgId: string; granteeId: string; proof: ConsoleProof },
-): Promise<OrgDetail> {
-  const family = await openFamily(api, server, input.orgId, input.proof);
-  const line = family.roster.body.members.find((entry) => entry.accountId === input.granteeId);
-  if (!line || input.granteeId === family.accountId) throw new Error('The family’s list of members does not name that person. Load the family again.');
-  if (!line.verified) throw new Error('Your emergency contact must be someone whose code was compared when they joined.');
-  const recipientKey = await memberKeyIn(family, line.accountId);
-  const box = await sealEmergencyBox(family.root, { sender: family.member, senderId: family.accountId, recipientKey, recipientId: line.accountId }, input.orgId);
-  return api.setOrgEmergency(input.orgId, { grantee: input.granteeId, box: wire(box) });
-}
-
-// --- An organiser recovering a member ------------------
+// --- An organiser recovering a member ---------------------------------------
 //
 // The recovery key's public half is taken from the roster once its MAC
 // checks out, and its private half opens only as from the organiser the
@@ -1854,3 +1997,219 @@ export async function consoleAskFamily(
     },
   };
 }
+
+// --- Emergency access between any two accounts -------------------------------
+//
+// The page opens the root with what the person typed or touched, then the
+// account's contact key sealed to it, making one the first time, and seals
+// it under every product's key the root opens, so each product's devices use
+// it without asking. It pins the other side's key under every product's key,
+// once the two compared the code, and hands over every chosen product's key
+// sealed to the key it pinned: never to the key the server lists, which is
+// only the server's word until the code matched.
+
+/** What the page holds while one emergency step runs: dropped when it returns. */
+interface EmergencyHere {
+  held: Held;
+  products: { product: string; key: CryptoKey }[];
+  contactKey: ContactKey;
+  state: EmergencyState;
+}
+
+async function openEmergencyHere(api: HttpSyncAdapter, server: AccountServer, proof: ConsoleProof): Promise<EmergencyHere> {
+  const held = withRoot(await api.consoleKeys());
+  const { root } = await opened(() => openRoot(server, held, proof), proof);
+  const products = (await openBoxes(held, root)).map(({ product, key }) => ({ product, key }));
+  let state = await api.emergency();
+  let contactKey: ContactKey | null = null;
+  // Sealed to the root again when there is no box of it this root opens.
+  let toRoot = true;
+  if (!state.myKey) {
+    contactKey = await newContactKey();
+  } else {
+    if (state.myKey.box) {
+      try {
+        contactKey = await openContactKeyWithRoot(boxFrom<ContactRootBox>(state.myKey.box), root, held.accountId);
+        toRoot = false;
+      } catch (error) {
+        if (!(error instanceof DecryptionError)) throw error;
+      }
+    }
+    // The root was replaced since the key was sealed to it: a product's box of the key still opens.
+    for (const entry of contactKey ? [] : (state.myKey.productBoxes ?? [])) {
+      const key = products.find((opened) => opened.product === entry.product)?.key;
+      if (!key) continue;
+      try {
+        contactKey = await openContactKeyWithProduct(boxFrom<SealedBox>(entry.box), key, held.accountId, entry.product);
+        break;
+      } catch (error) {
+        if (!(error instanceof DecryptionError)) throw error;
+      }
+    }
+    if (!contactKey) throw new Error('This account’s contact key does not open here. Open a Keyrook app signed in to this account, then try again.');
+    // The public half comes from what opened. One the server lists otherwise is its word, and wrong.
+    if (contactKey.publicKey !== state.myKey.publicKey) throw new Error('The server lists another contact key for this account.');
+  }
+  // Every product's box of it, each time: a product the account signed in to since gets its own.
+  const productBoxes = [];
+  for (const { product, key } of products) productBoxes.push({ product, box: wire(await sealContactKeyUnderProduct(contactKey, key, held.accountId, product)) });
+  state = await api.putContactKey({
+    publicKey: contactKey.publicKey,
+    ...(toRoot ? { rootBox: wire(await sealContactKeyToRoot(contactKey, root.publicKey, held.accountId)) } : {}),
+    productBoxes,
+  });
+  const here = { held, products, contactKey, state };
+  return { ...here, state: await spreadContactPins(api, here) };
+}
+
+/** What a product of this account pinned for `otherId`, if its pin opens. */
+async function contactPinOf(here: EmergencyHere, otherId: string, product: string): Promise<ContactPin | null> {
+  const entry = here.state.pins.find((pin) => pin.contactId === otherId && pin.product === product);
+  const key = here.products.find((opened) => opened.product === product)?.key;
+  if (!entry || !key) return null;
+  try {
+    return await openContactPin(key, boxFrom<SealedBox>(entry.box), here.held.accountId, otherId, product);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A pin of the key someone has now, sealed again under every product's key
+ * that holds no pin of it: a product the account signed in to after the code
+ * matched trusts the same key, without the two comparing again. A key no
+ * product pinned is left for the two to compare.
+ */
+async function spreadContactPins(api: HttpSyncAdapter, here: EmergencyHere): Promise<EmergencyState> {
+  let state = here.state;
+  const listed = new Map<string, string>();
+  for (const grant of [...state.named, ...state.namedMe]) {
+    const otherId = emergencyOther(grant, here.held.accountId);
+    if (otherId && grant.otherKey) listed.set(otherId, grant.otherKey);
+  }
+  for (const [otherId, otherKey] of listed) {
+    const pins = new Map<string, ContactPin | null>();
+    for (const { product } of here.products) pins.set(product, await contactPinOf(here, otherId, product));
+    const held = [...pins.values()].find((pin) => pin?.contactKey === otherKey);
+    if (!held) continue;
+    for (const { product, key } of here.products) {
+      if (pins.get(product)?.contactKey === otherKey) continue;
+      state = await api.putContactPin(otherId, product, wire(await sealContactPin(key, held, here.held.accountId, otherId, product)));
+    }
+  }
+  return state;
+}
+
+/** The other side of a grant, from where this account stands. */
+function emergencyOther(grant: EmergencyGrant, accountId: string): string | null {
+  return grant.grantorId === accountId ? grant.contactId : grant.grantorId;
+}
+
+/**
+ * Every chosen product's key, sealed to each contact whose key a pin of that
+ * product holds and the server still lists. Those whose key no pin holds are
+ * named, to compare first.
+ */
+async function handOverFromPage(api: HttpSyncAdapter, here: EmergencyHere): Promise<{ state: EmergencyState; compare: string[] }> {
+  let state = here.state;
+  const compare = new Set<string>();
+  for (const grant of here.state.named) {
+    if (!grant.contactId || !grant.otherKey) continue;
+    for (const product of grant.products) {
+      if (grant.boxes.includes(product)) continue;
+      const key = here.products.find((opened) => opened.product === product)?.key;
+      if (!key) continue;
+      const pinned = (await contactPinOf({ ...here, state }, grant.contactId, product))?.contactKey;
+      if (!pinned || pinned !== grant.otherKey) {
+        compare.add(grant.id);
+        continue;
+      }
+      const box = await sealEmergencyKey(key, { grantor: here.contactKey, grantorId: here.held.accountId, contactKey: pinned, contactId: grant.contactId }, product);
+      state = await api.putEmergencyKeyBox(grant.id, product, wire(box));
+    }
+  }
+  return { state, compare: [...compare] };
+}
+
+/** How the person answered the code: it matched, they chose not to compare, or they stopped. */
+export type EmergencyCompareAnswer = 'match' | 'unchecked' | null;
+
+/**
+ * Compares the code with the other side of a grant, and on the person's
+ * answer pins their key under every product's key, then hands over what this
+ * account chose for its own contacts. The proof is asked once: `compare` is
+ * shown the code while the two screens are compared. An account no product
+ * signed in to yet has no key to pin under: the code is shown, for the other
+ * side to compare, and `pinned` says nothing was kept of the answer.
+ */
+export async function consoleEmergencyTrust(
+  api: HttpSyncAdapter,
+  server: AccountServer,
+  input: { grantId: string; proof: ConsoleProof; compare: (code: string) => Promise<EmergencyCompareAnswer> },
+): Promise<{ state: EmergencyState; compare: string[]; pinned: boolean } | null> {
+  const here = await openEmergencyHere(api, server, input.proof);
+  const grant = [...here.state.named, ...here.state.namedMe].find((entry) => entry.id === input.grantId);
+  const otherId = grant && emergencyOther(grant, here.held.accountId);
+  if (!grant || !otherId) throw new Error('They have not accepted yet.');
+  if (!grant.otherKey) throw new Error('They have no contact key yet: it is made the next time they open Keyrook.');
+  const code = await contactCode({ accountId: here.held.accountId, contactKey: here.contactKey.publicKey }, { accountId: otherId, contactKey: grant.otherKey });
+  const answer = await input.compare(code);
+  if (!answer) return null;
+  let state = here.state;
+  for (const { product, key } of here.products) {
+    const box = await sealContactPin(key, { contactKey: grant.otherKey, compared: answer === 'match' }, here.held.accountId, otherId, product);
+    state = await api.putContactPin(otherId, product, wire(box));
+  }
+  return { ...(await handOverFromPage(api, { ...here, state })), pinned: here.products.length > 0 };
+}
+
+/** Hands over every chosen product's key to each contact this account pinned: after a contact accepted, or a product was added. */
+export async function consoleEmergencyHandOver(api: HttpSyncAdapter, server: AccountServer, input: { proof: ConsoleProof }): Promise<{ state: EmergencyState; compare: string[] }> {
+  return handOverFromPage(api, await openEmergencyHere(api, server, input.proof));
+}
+
+/**
+ * Accepts being someone's emergency contact, making this account's contact
+ * key here if it has none, so the one who named it can compare the code.
+ */
+export async function consoleEmergencyAccept(api: HttpSyncAdapter, server: AccountServer, input: { grantId: string; proof: ConsoleProof }): Promise<EmergencyState> {
+  await openEmergencyHere(api, server, input.proof);
+  return api.acceptEmergency(input.grantId);
+}
+
+// --- Linking two products ----------------------------------------------------
+//
+// A link's key is sealed under each of its two products' keys, which only the
+// root opens: the page opens it with what the person typed or touched, makes
+// the key, seals both boxes, and drops it all.
+
+/**
+ * Links two of the account's products: a new link key,
+ * sealed under each one's key. Both must have a key already: an app the
+ * person never signed in to has none to seal under. A link turned on already
+ * is left as it is, so nothing written under its key is lost.
+ */
+export async function consoleLinkProducts(
+  api: HttpSyncAdapter,
+  server: AccountServer,
+  input: { products: [string, string]; proof: ConsoleProof },
+): Promise<LinkState> {
+  const link = linkIdOf(input.products[0], input.products[1]);
+  try {
+    return await api.link(link);
+  } catch (error) {
+    if (!(error instanceof SyncHttpError) || error.status !== 404) throw error;
+  }
+  const held = withRoot(await api.consoleKeys());
+  const { root } = await opened(() => openRoot(server, held, input.proof), input.proof);
+  const keys = await openBoxes(held, root);
+  const boxes = [];
+  const key = await newLinkKey();
+  for (const product of link.split('+')) {
+    const own = keys.find((entry) => entry.product === product)?.key;
+    if (!own) throw new Error('Sign in to both apps with this account first: each needs a key of its own to hold the link’s.');
+    boxes.push({ product, box: wire(await sealLinkKey(key, own, held.accountId, link, product)) });
+  }
+  return api.putLinkBoxes(link, { boxes });
+}
+

@@ -1,5 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react';
-import { checkup, everyItem, loginIssues, settleFolder, type DeviceCredential, type LoginItem, type VaultData, type VaultPlace, type VaultSecret, type WalletItem, type WalletKind } from '@passhold/core';
+import { useContext, useMemo, useState, type FormEvent } from 'react';
+import { checkup, everyItem, loginIssues, placeOf, settleFolder, type DeviceCredential, type LoginItem, type VaultData, type VaultPlace, type VaultSecret, type WalletItem, type WalletKind } from '@passhold/core';
 import { useT } from '../i18n/react.js';
 import { EditScreen } from '../popup/EditScreen.js';
 import { ItemScreen } from '../popup/ItemScreen.js';
@@ -9,7 +9,8 @@ import { FolderFilter, foldersOf, shownFolder, unfiledCount } from '../ui/Folder
 import { useAction, useCopy } from '../ui/hooks.js';
 import { CheckIcon, CopyIcon, EditIcon, FingerprintIcon, FolderIcon, SearchIcon, StarIcon, UserIcon } from '../ui/icons.js';
 import { AddMenu, KindChips, type Shown } from '../ui/Kinds.js';
-import { atPlace, PlaceContext, PlaceTabs, samePlace, sharedVaults, type SharedVault } from '../ui/place.js';
+import { atPlace, organiserAt, PlaceContext, PlaceTabs, samePlace, sharedVaults, viewOnlyAt, ViewOnlyContext, type SharedVault } from '../ui/place.js';
+import { FilesContext } from '../ui/Files.js';
 import { Button, Callout, cx } from '../ui/primitives.js';
 import { SiteMark } from '../ui/SiteMark.js';
 import { entriesOf, NONE_OF, walletLine, walletName } from '../ui/wallet.js';
@@ -45,14 +46,20 @@ export function PasswordsPanel(props: {
   onView: (view: PasswordsView) => void;
   onBackUp: () => void;
   onSecurity: () => void;
+  /** An item to open as the page opens: one the popup sent here to attach a file to. */
+  opening?: string | null;
 }) {
   const shared = useMemo(() => sharedVaults(props.data), [props.data]);
-  const [chosen, setChosen] = useState<VaultPlace | null>(null);
+  const [chosen, setChosen] = useState<VaultPlace | null>(() => (props.opening ? placeOf(props.data, props.opening) ?? null : null));
   // A shared vault gone from this browser leaves the vault's own shown.
   const place = shared.some((entry) => samePlace(entry.place, chosen)) ? chosen : null;
   return (
     <PlaceContext.Provider value={place}>
-      <PasswordsAt key={place ? `${place.orgId}:${place.vaultId}` : 'mine'} {...props} vault={props.data} data={atPlace(props.data, place)} shared={shared} place={place} onPlace={setChosen} />
+      <ViewOnlyContext.Provider value={viewOnlyAt(props.data, place)}>
+        <FilesContext.Provider value={{ linked: props.linked, organiser: organiserAt(props.data, place), settings: true }}>
+          <PasswordsAt key={place ? `${place.orgId}:${place.vaultId}` : 'mine'} {...props} vault={props.data} data={atPlace(props.data, place)} shared={shared} place={place} onPlace={setChosen} />
+        </FilesContext.Provider>
+      </ViewOnlyContext.Provider>
     </PlaceContext.Provider>
   );
 }
@@ -71,6 +78,7 @@ function PasswordsAt({
   onView,
   onBackUp,
   onSecurity,
+  opening = null,
 }: {
   vault: VaultData;
   data: VaultData;
@@ -84,9 +92,13 @@ function PasswordsAt({
   onView: (view: PasswordsView) => void;
   onBackUp: () => void;
   onSecurity: () => void;
+  opening?: string | null;
 }) {
   const t = useT();
-  const [open, setOpen] = useState<Open>({ name: 'list' });
+  const viewOnly = useContext(ViewOnlyContext);
+  const [open, setOpen] = useState<Open>(() =>
+    opening && data.items.some((item) => item.id === opening) ? { name: 'item', id: opening } : opening && data.wallet.some((item) => item.id === opening) ? { name: 'wallet', id: opening } : { name: 'list' },
+  );
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<Shown>('all');
   const [chosenFolder, setFolder] = useState<string | null>(null);
@@ -116,6 +128,7 @@ function PasswordsAt({
           <ItemScreen
             item={item}
             data={data}
+            linked={linked}
             shared={place ? [] : shared}
             className={CARD}
             onBack={() => setOpen({ name: 'list' })}
@@ -178,7 +191,7 @@ function PasswordsAt({
       <PageHeader
         title={t('nav.passwords')}
         description={t('passwords.description')}
-        action={<AddMenu wide onAdd={(next) => setOpen(next === 'login' ? { name: 'edit', id: null } : { name: 'walletEdit', kind: next, id: null })} />}
+        action={viewOnly ? undefined : <AddMenu wide onAdd={(next) => setOpen(next === 'login' ? { name: 'edit', id: null } : { name: 'walletEdit', kind: next, id: null })} />}
       />
       <div className="mb-5">
         <Choice<PasswordsView>
@@ -326,7 +339,7 @@ function FolderBar({ folder, count, data, onRenamed }: { folder: string; count: 
   );
 }
 
-function LoginRow({
+export function LoginRow({
   item,
   data,
   copied,
@@ -376,7 +389,7 @@ function LoginRow({
   );
 }
 
-function WalletLine({
+export function WalletLine({
   item,
   copied,
   onCopy,
@@ -388,6 +401,7 @@ function WalletLine({
   onOpen: () => void;
 }) {
   const t = useT();
+  const copyKey = t('wallet.copyField', { field: t('apikey.key').toLocaleLowerCase(t.locale) });
   return (
     <li className="group flex items-center gap-2 border-b border-neutral-100 pe-3 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800/80 dark:hover:bg-neutral-900">
       <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-start">
@@ -404,6 +418,13 @@ function WalletLine({
         <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           <Button size="sm" variant="ghost" aria-label={t('card.copyNumber')} title={t('card.copyNumber')} onClick={() => void onCopy(`${item.id}:n`, item.number)}>
             {copied === `${item.id}:n` ? <CheckIcon className="h-4 w-4 text-green-700 dark:text-green-300" /> : <CopyIcon className="h-4 w-4" />}
+          </Button>
+        </span>
+      )}
+      {item.kind === 'apikey' && item.key && (
+        <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          <Button size="sm" variant="ghost" aria-label={copyKey} title={copyKey} onClick={() => void onCopy(`${item.id}:k`, item.key)}>
+            {copied === `${item.id}:k` ? <CheckIcon className="h-4 w-4 text-green-700 dark:text-green-300" /> : <CopyIcon className="h-4 w-4" />}
           </Button>
         </span>
       )}

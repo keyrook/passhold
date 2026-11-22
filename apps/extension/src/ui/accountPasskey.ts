@@ -1,4 +1,5 @@
 import { fromBase64, PASSKEY_PRF_INPUT, toBase64, toBase64url } from '@passhold/core';
+import type { PasskeySignInOptions as AccountPasskeyOptions } from '@keyrook/account';
 import { BackgroundError, send, type AccountPasskeyTouch } from '../lib/messaging.js';
 import { onEdge } from '../lib/name.js';
 
@@ -25,7 +26,15 @@ export async function touchAccountPasskey(purpose: 'signIn' | 'secondStep' = 'si
   // Before anything else is awaited: Chrome asks only while the click is fresh.
   const allowed = (await chrome.permissions.contains({ origins: ORIGINS })) || (await chrome.permissions.request({ origins: ORIGINS }));
   if (!allowed) throw new BackgroundError('no permission', onEdge() ? 'error.passkeyPermissionEdge' : 'error.passkeyPermission');
-  const options = await send({ type: purpose === 'secondStep' ? 'account/secondStepPasskey' : 'account/passkeyChallenge' });
+  return touchFor(await send({ type: purpose === 'secondStep' ? 'account/secondStepPasskey' : 'account/passkeyChallenge' }));
+}
+
+/**
+ * The passkey touched for a challenge the server issued: where no permission
+ * is asked first, as in the web vault, whose origin the account's page lists
+ * as its own (`/.well-known/webauthn`).
+ */
+export async function touchFor(options: AccountPasskeyOptions): Promise<AccountPasskeyTouch> {
   let credential: PublicKeyCredential | null;
   try {
     credential = (await navigator.credentials.get({

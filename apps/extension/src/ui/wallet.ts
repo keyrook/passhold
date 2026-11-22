@@ -1,11 +1,12 @@
-import { cardExpired, cardExpiry, searchLogins, searchWallet, walletTitle, type LoginItem, type VaultData, type WalletItem } from '@passhold/core';
+import { cardExpired, cardExpiry, expiryNotice, searchLogins, searchWallet, serviceName, walletTitle, type ApiKeyItem, type LoginItem, type VaultData, type WalletItem } from '@passhold/core';
 import type { Translator } from '../i18n/react.js';
 import type { MessageKey } from '../i18n/locales/en.js';
 import type { Shown } from './Kinds.js';
 
 /** An item's name in a page: its own, one made from what it holds, or its kind's word when there is neither. */
 export function walletName(item: WalletItem, t: Translator): string {
-  return walletTitle(item) || t(item.kind === 'card' ? 'card.untitled' : item.kind === 'address' ? 'address.untitled' : 'note.untitled');
+  const untitled: Record<WalletItem['kind'], MessageKey> = { card: 'card.untitled', address: 'address.untitled', note: 'note.untitled', ssh: 'add.ssh', apikey: 'add.apikey' };
+  return walletTitle(item) || t(untitled[item.kind]);
 }
 
 /** A country by its code, in the reader's language. */
@@ -34,7 +35,31 @@ export function walletLine(item: WalletItem, t: Translator): string {
       return [item.street.split('\n')[0], item.city, item.country && countryName(item.country, t.locale)].filter(Boolean).join(', ');
     case 'note':
       return t('note.edited', { date: new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium' }).format(item.updatedAt) });
+    case 'ssh':
+      // What a server's log and `ssh-add -l` show of it: enough to tell two keys apart, and no secret.
+      return item.fingerprint;
+    case 'apikey': {
+      // Its service and environment where its name does not say them, else where it goes; and that it runs out, when it does.
+      const said = item.title ? [serviceName(item.service), item.environment] : [];
+      const where = item.service ? '' : (item.hosts[0] ?? '');
+      const parts = [...said, where, expiryWords(item, t)].filter(Boolean);
+      // Two keys with nothing else to tell them apart, by their last characters, as a card by its last digits.
+      return parts.length ? parts.join(' · ') : item.key.length >= 16 ? `•••• ${item.key.slice(-4)}` : '';
+    }
   }
+}
+
+/** A day an API key was issued or expires: stored as midnight UTC, and shown as that date wherever its reader is. */
+export function keyDate(day: number, t: Translator): string {
+  return new Intl.DateTimeFormat(t.locale, { dateStyle: 'medium', timeZone: 'UTC' }).format(day);
+}
+
+/** That a key has run out or runs out soon, in its reader's words; '' when it does neither. */
+export function expiryWords(item: ApiKeyItem, t: Translator, now = Date.now()): string {
+  const notice = expiryNotice(item, now);
+  if (!notice) return '';
+  if (notice.expired) return t('apikey.expiredOn', { date: keyDate(item.expiresAt!, t) });
+  return t('apikey.expiresWhen', { when: new Intl.RelativeTimeFormat(t.locale, { numeric: 'auto' }).format(notice.days, 'day') });
 }
 
 /** A row of a list of everything: a login, or a card, an address or a note. */

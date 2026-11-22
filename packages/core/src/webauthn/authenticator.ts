@@ -12,6 +12,7 @@
  * Attestation is "none": a site learns that a passkey is Passhold's from the
  * AAGUID below, and nothing about the person.
  */
+import { PassholdError } from '../errors.js';
 import type { StoredPasskey } from '../vault/model.js';
 import { concatBytes, fromBase64, fromHex, toBase64, toBase64url, utf8 } from '../util/bytes.js';
 import { randomBytes } from '../util/id.js';
@@ -135,9 +136,19 @@ export interface Assertion {
 
 /** A signature for a sign-in: over this site, these flags and what the site asked (`clientDataJSON`). */
 export async function assertPasskey(passkey: StoredPasskey, clientData: Uint8Array): Promise<Assertion> {
+  return assertPasskeyOver(passkey, await sha256(clientData));
+}
+
+/**
+ * The same, over the hash of what the site asked, where whoever made the
+ * request keeps the client data itself and hands over only its hash: a
+ * browser asking a phone's passkey provider.
+ */
+export async function assertPasskeyOver(passkey: StoredPasskey, clientDataHash: Uint8Array): Promise<Assertion> {
+  if (clientDataHash.length !== 32) throw new PassholdError('itemInvalid');
   const key = await crypto.subtle.importKey('pkcs8', fromBase64(passkey.privateKey) as BufferSource, P256, false, ['sign']);
   const data = await authenticatorData(passkey.rpId, UP | UV | BE | BS);
-  const signed = concatBytes(data, await sha256(clientData));
+  const signed = concatBytes(data, clientDataHash);
   const raw = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, signed as BufferSource));
   return { authenticatorData: data, signature: derSignature(raw), userHandle: fromBase64(passkey.userHandle) };
 }

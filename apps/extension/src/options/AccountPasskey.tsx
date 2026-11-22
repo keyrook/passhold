@@ -3,6 +3,7 @@ import { useT } from '../i18n/react.js';
 import type { MessageKey } from '../i18n/locales/en.js';
 import { BackgroundError, send } from '../lib/messaging.js';
 import { browserName } from '../lib/name.js';
+import { isFirefox } from '../lib/platform.js';
 import { touchAccountPasskey } from '../ui/accountPasskey.js';
 import { useAction } from '../ui/hooks.js';
 import { ExternalIcon, KeyIcon } from '../ui/icons.js';
@@ -36,6 +37,9 @@ export function AccountPasskeyButton({ join = false, onIn }: { join?: boolean; o
         throw caught;
       }
     });
+  // The account's server takes its passkeys from no Firefox extension, whose
+  // address is drawn at install (scripts/firefox.mjs): no button that cannot work.
+  if (isFirefox()) return null;
   return (
     <div className="flex flex-col gap-2">
       <Button variant="secondary" className="w-full" disabled={busy} onClick={go}>

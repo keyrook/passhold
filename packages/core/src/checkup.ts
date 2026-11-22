@@ -2,15 +2,17 @@
  * What in a vault needs its owner's attention, worked out on this device from
  * the vault alone.
  *
- * Weak and reused passwords, and a backup that is missing or behind. Not
+ * Weak and reused passwords, API keys running out, and a backup that is
+ * missing or behind. Not
  * "breached": knowing that means asking a server, and Passhold asks none.
  * Not "old" either: a strong, unique password does not weaken with age, and
  * asking people to change good passwords on a schedule is advice the
  * standards (NIST SP 800-63B) have dropped, because it makes passwords worse.
  */
+import { expiringKeys } from './apikey.js';
 import { siteOf } from './match.js';
 import { scorePassword } from './strength.js';
-import type { LoginItem, VaultData } from './vault/model.js';
+import type { ApiKeyItem, LoginItem, VaultData } from './vault/model.js';
 
 /** A backup made this long ago, with logins changed since, is due again. */
 export const BACKUP_DUE_AFTER = 30 * 24 * 60 * 60 * 1000;
@@ -20,10 +22,16 @@ export interface Checkup {
   weak: LoginItem[];
   /** Live logins sharing a password, one group per password, largest first. */
   reused: LoginItem[][];
+  /**
+   * Live API keys expired, or expiring within `EXPIRY_NOTICE_DAYS`, the
+   * soonest first. Only this device can say so: the date is sealed with the
+   * key, and the server never reads it.
+   */
+  expiring: ApiKeyItem[];
   backup: 'never' | 'due' | 'ok';
   /** A recovery key drawn but not yet put away: the one way in if the device is lost. */
   recoveryKeyPending: boolean;
-  /** How many things there are to do: each weak login, each reused group, a due backup, a recovery key to keep. */
+  /** How many things there are to do: each weak login, each reused group, each key running out, a due backup, a recovery key to keep. */
   issues: number;
 }
 
@@ -41,6 +49,7 @@ export function checkup(data: VaultData, now = Date.now(), accountLinked = false
     byPassword.set(item.password, [...(byPassword.get(item.password) ?? []), item]);
   }
   const reused = [...byPassword.values()].filter((group) => group.length > 1).sort((a, b) => b.length - a.length);
+  const expiring = expiringKeys(data, now);
 
   let backup: Checkup['backup'] = 'ok';
   // A card or a note is as much to lose as a login.
@@ -56,9 +65,10 @@ export function checkup(data: VaultData, now = Date.now(), accountLinked = false
   return {
     weak,
     reused,
+    expiring,
     backup,
     recoveryKeyPending,
-    issues: weak.length + reused.length + (backup === 'ok' ? 0 : 1) + (recoveryKeyPending ? 1 : 0),
+    issues: weak.length + reused.length + expiring.length + (backup === 'ok' ? 0 : 1) + (recoveryKeyPending ? 1 : 0),
   };
 }
 

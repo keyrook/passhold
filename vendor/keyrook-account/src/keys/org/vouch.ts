@@ -1,8 +1,8 @@
 /**
- * An organiser's word that a key is someone's: once
- * the join code matched, the organiser's device tells each member of the
- * family, itself included, which key it compared, so their devices take that
- * key without comparing a code of their own.
+ * An organiser's word that a key is someone's: once the join code matched, the
+ * organiser's device tells each member of the family, itself included, which
+ * key it compared, so their devices take that key without comparing a code of
+ * their own.
  *
  * The roster's MAC will not do for this: every member holds the family key
  * and could make one. So each word is a MAC under a key from ECDH of the
