@@ -16,7 +16,7 @@
  */
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import { chmodSync, existsSync, mkdirSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fromUtf8, SshReader, sshSigner, SshWriter, type SshSigner } from '@passhold/core';
 import type { Account } from './account.js';
 import type { Context } from './cli.js';
@@ -114,12 +114,15 @@ const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every(
 
 const frame = (payload: Uint8Array) => new SshWriter().uint32(payload.length).bytes(payload).done();
 
+/** The longest path a Unix socket takes, in bytes: sun_path, less its closing zero. */
+const socketLimit = (platform: NodeJS.Platform) => (platform === 'darwin' ? 103 : 107);
+
 /** Listens where asked, refusing to take over another agent's socket. */
 async function listenAt(path: string, platform: NodeJS.Platform, handle: (socket: Socket) => void): Promise<Server> {
   const server = createServer(handle);
   if (platform !== 'win32') {
     // A Unix socket's path is short: past it, the system would cut it, and ssh would look elsewhere.
-    if (Buffer.byteLength(path) > (platform === 'darwin' ? 103 : 107)) throw new CliError(`That socket's path is too long for a socket: ${path}. Pass a shorter one with --socket.`);
+    if (Buffer.byteLength(path) > socketLimit(platform)) throw new CliError(`That socket's path is too long for a socket: ${path}. Pass a shorter one with --socket.`);
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     if (existsSync(path)) {
       const alive = await new Promise<boolean>((done) => {
@@ -267,6 +270,10 @@ export async function agent(context: Context, options: AgentOptions): Promise<nu
 
   const path = options.socket ?? defaultSocket(context.env, platform);
   const server = await listenAt(path, platform, handle);
+  // Listened at as given, which keeps a long folder's socket under the length limit; named in full, or ssh run from another folder would look elsewhere.
+  // A full path past that limit would reach no socket at all, so it is named as given, and said to be from this folder.
+  const full = platform === 'win32' ? path : resolvePath(path);
+  const named = platform !== 'win32' && Buffer.byteLength(full) > socketLimit(platform) ? path : full;
   const cleanUp = () => {
     server.close();
     for (const socket of connections) socket.destroy();
@@ -278,10 +285,11 @@ export async function agent(context: Context, options: AgentOptions): Promise<nu
   context.signal?.addEventListener('abort', aborted, { once: true });
   try {
     // What a shell evaluates, as ssh-agent prints it, on the output; the rest for the person.
-    context.out(platform === 'win32' ? `$env:SSH_AUTH_SOCK = '${path}'\n` : `SSH_AUTH_SOCK=${shellQuoted(path)}; export SSH_AUTH_SOCK;\n`);
+    context.out(platform === 'win32' ? `$env:SSH_AUTH_SOCK = '${named}'\n` : `SSH_AUTH_SOCK=${shellQuoted(named)}; export SSH_AUTH_SOCK;\n`);
     say(keys.length ? `Offering ${keys.length} key${keys.length === 1 ? '' : 's'}: ${keys.map((key) => `"${key.name}"`).join(', ')}.` : 'No SSH key in the vaults can sign here yet.');
+    if (named !== full) say(`Its full path is too long for ssh to reach: run ssh from this folder, or pass a shorter --socket.`);
     say(options.confirm ? `Each signature is asked for first, ${approve!.how}.` : 'Signing without asking first, as --no-confirm says.');
-    say(platform === 'win32' ? `Listening at ${path}. Stop with Ctrl-C.` : `Listening at ${path}. For every ssh, put in ~/.ssh/config:\n  Host *\n    IdentityAgent "${path}"\nStop with Ctrl-C.`);
+    say(platform === 'win32' ? `Listening at ${named}. Stop with Ctrl-C.` : `Listening at ${named}. For every ssh, put in ~/.ssh/config:\n  Host *\n    IdentityAgent "${named}"\nStop with Ctrl-C.`);
     const reason = await stopped;
     if (reason) say(`${reason} The agent has stopped.`);
     return 0;

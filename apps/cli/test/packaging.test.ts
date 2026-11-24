@@ -5,7 +5,7 @@
  * manifests naming exactly the files a release carries.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { resolve as path } from 'node:path';
 import { build } from 'vite';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -20,9 +20,18 @@ import {
   wingetManifests,
   withoutSignature,
 } from '../scripts/packaging.mjs';
+import { tarGz, zip } from '../scripts/archive.mjs';
 import { clientName, VERSION } from '../src/account.js';
 
 const CLI = path(import.meta.dirname, '..');
+const hasRuby = (() => {
+  try {
+    execFileSync('ruby', ['-ryaml', '-e', '']);
+    return true;
+  } catch {
+    return false;
+  }
+})();
 // What must not be published is listed outside what is: the public tree checks nothing against it.
 const TRACES = path(CLI, '../../scripts/traces.mjs');
 // A program holds the services' catalogues as literals, which name services and nothing else: the list takes those out before it looks.
@@ -77,10 +86,19 @@ describe('a release of the command line', () => {
     expect(Object.keys(manifests).sort()).toEqual([`${folder}/Keyrook.Passhold.CLI.installer.yaml`, `${folder}/Keyrook.Passhold.CLI.locale.en-US.yaml`, `${folder}/Keyrook.Passhold.CLI.yaml`]);
     const installer = manifests[`${folder}/Keyrook.Passhold.CLI.installer.yaml`]!;
     const windows = TARGETS.find((target) => target.os === 'windows')!;
-    expect(installer).toContain(`InstallerUrl: ${urlOf(VERSION, windows)}\n    InstallerSha256: ${sums[assetOf(VERSION, windows)]!.toUpperCase()}`);
+    expect(installer).toContain(`InstallerUrl: ${urlOf(VERSION, windows)}\n    InstallerSha256: '${sums[assetOf(VERSION, windows)]!.toUpperCase()}'`);
     expect(installer).toContain(`RelativeFilePath: passhold-${VERSION}-windows-x64\\passhold.exe\n    PortableCommandAlias: passhold`);
     expect(manifests[`${folder}/Keyrook.Passhold.CLI.locale.en-US.yaml`]).toContain('License: GPL-3.0-or-later');
     for (const text of Object.values(manifests)) expect(text).toContain(`PackageVersion: ${VERSION}`);
+    // Read by a YAML parser, as winget's validation reads them: a plain value with ": " in it is no YAML at all, and a sum of digits alone would be a number.
+    if (hasRuby) {
+      const read = (text: string) => JSON.parse(execFileSync('ruby', ['-ryaml', '-rjson', '-rdate', '-e', 'puts JSON.generate(YAML.safe_load(STDIN.read, permitted_classes: [Date]))'], { input: text, encoding: 'utf8' }));
+      const locale = read(manifests[`${folder}/Keyrook.Passhold.CLI.locale.en-US.yaml`]!);
+      expect(locale.ShortDescription).toMatch(/^Passhold, the password manager by Keyrook, in a terminal: /);
+      expect(locale.Tags).toContain('ssh-agent');
+      expect(read(installer).Installers[0].InstallerSha256).toBe(sums[assetOf(VERSION, windows)]!.toUpperCase());
+      expect(read(installer).NestedInstallerFiles[0].RelativeFilePath).toBe(`passhold-${VERSION}-windows-x64\\passhold.exe`);
+    }
     expect(sumsFile(sums).split('\n').filter(Boolean)).toHaveLength(TARGETS.length);
   });
 
@@ -123,5 +141,42 @@ describe('a Windows program, signed by Node.js', () => {
     odd.writeUInt32LE(0x100, 0x80 + 24 + 112 + 32);
     expect(() => withoutSignature(odd)).toThrow(/not at the end/);
     expect(() => withoutSignature(Buffer.from('#!/bin/sh\n'))).toThrow(/Not a Windows program/);
+  });
+});
+
+describe('a release archive', () => {
+  const entries = [
+    { name: 'passhold-0.2.0-linux-x64/passhold', bytes: Buffer.from('#!/bin/sh\necho passhold\n'), program: true },
+    { name: 'passhold-0.2.0-linux-x64/LICENSE', bytes: Buffer.alloc(70_000, 'GPL ') },
+  ];
+  // 2026-11-20 10:11:12 UTC: an even second, as zip keeps them.
+  const epoch = 1_795_255_872;
+
+  /** What the system's own tar or unzip makes of it, in a folder of its own. */
+  function unpacked(kind: 'tar' | 'zip', bytes: Buffer) {
+    const into = path(OUT, `${kind}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(into, { recursive: true });
+    const file = path(into, kind === 'tar' ? 'a.tar.gz' : 'a.zip');
+    writeFileSync(file, bytes);
+    if (kind === 'tar') execFileSync('tar', ['-xzf', file, '-C', into]);
+    else execFileSync('unzip', ['-q', file, '-d', into]);
+    return (name: string) => ({ bytes: readFileSync(path(into, name)), stat: statSync(path(into, name)) });
+  }
+
+  it('is the same bytes from the same files, whenever and wherever it is made', () => {
+    expect(tarGz(entries, epoch).equals(tarGz(entries.map((entry) => ({ ...entry, bytes: Buffer.from(entry.bytes) })), epoch))).toBe(true);
+    expect(zip(entries, epoch).equals(zip(entries, epoch))).toBe(true);
+    expect(tarGz(entries, epoch).equals(tarGz(entries, epoch + 2))).toBe(false);
+    // gzip names no system and no time.
+    expect([...tarGz(entries, epoch).subarray(4, 10)]).toEqual([0, 0, 0, 0, 2, 0xff]);
+  });
+
+  it.each(['tar', 'zip'] as const)('unpacks with the system’s own %s: each file whole, the program runnable, dated at the commit', (kind) => {
+    const read = unpacked(kind, kind === 'tar' ? tarGz(entries, epoch) : zip(entries, epoch));
+    for (const entry of entries) expect(read(entry.name).bytes.equals(entry.bytes)).toBe(true);
+    expect(read(entries[0]!.name).stat.mode & 0o777).toBe(0o755);
+    expect(read(entries[1]!.name).stat.mode & 0o777).toBe(0o644);
+    // A zip's time is the local time unzip reads it as; tar's is the instant itself.
+    if (kind === 'tar') expect(read(entries[1]!.name).stat.mtimeMs).toBe(epoch * 1000);
   });
 });

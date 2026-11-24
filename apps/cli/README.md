@@ -11,18 +11,47 @@ itself stays free.
 
 ## Install
 
+A program for each system, with nothing else to install:
+
 ```sh
-npm install --global @keyrook/passhold-cli    # Node.js 22 or later
+brew install keyrook/tap/passhold-cli         # macOS and Linux
+winget install Keyrook.Passhold.CLI           # Windows
 ```
 
-Homebrew, winget and a program for each system, with no Node.js to install,
-come with a later release.
+Or take the file for your system from the release on
+https://github.com/keyrook/passhold/releases (macOS 11 or later on Apple
+silicon or Intel; Linux on x64 or arm64 with glibc 2.28 or later, which
+leaves out Alpine; Windows 10 or later on x64), check it against
+`SHA256SUMS` there, unpack it and put `passhold` on your `PATH`:
+
+```sh
+shasum -a 256 -c --ignore-missing SHA256SUMS  # sha256sum on Linux
+tar -xzf passhold-0.2.0-macos-arm64.tar.gz
+sudo mv passhold-0.2.0-macos-arm64/passhold /usr/local/bin/
+```
+
+The Mac programs are not notarised by Apple yet: one downloaded in a browser
+is stopped by macOS until you clear its mark (`xattr -d
+com.apple.quarantine passhold`). Homebrew's, and one fetched with `curl`, run
+as they are.
+
+With Node.js 22 or later, npm has the same command line as one file:
+
+```sh
+npm install --global @keyrook/passhold-cli
+```
 
 ## Sign in and unlock
 
 ```sh
 passhold login --google            # or --github, or --email you@example.com
 eval "$(passhold unlock)"          # the account's password; --recovery-key; or --with-browser
+```
+
+In PowerShell, on Windows:
+
+```powershell
+$env:PASSHOLD_SESSION = passhold unlock --raw
 ```
 
 Signing in says who you are. Unlocking opens Passhold's key, for this shell
@@ -45,7 +74,8 @@ passhold inject --in config.tpl --out config.yml      # fills each {{ passhold:/
 ```
 
 `run` hands each reference's value to the command it runs, and to nothing
-else; `inject` writes a file only its owner can read.
+else; `inject` writes a file only its owner can read (on Windows, the
+file takes its folder's permissions: write it where only you can read).
 
 ## Vaults and items
 
@@ -105,5 +135,5 @@ Copyright (C) 2026 BRICK IT ALL LLC. Free software under the GNU General
 Public License, version 3 or (at your option) any later version: see
 `LICENSE`. A program built for one system is built on Node.js, whose licence
 is in `LICENSE.node.txt` beside it. Passhold's source is at
-https://github.com/keyrook/passhold; the command line's joins it with
-Passhold's next release.
+https://github.com/keyrook/passhold; the command line's is `apps/cli` there,
+and what changed in each version is in its `CHANGELOG.md`.

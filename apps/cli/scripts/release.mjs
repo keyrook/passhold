@@ -5,6 +5,11 @@
  *   npm run release -w @passhold/cli -- --programs   and a program for each system, with
  *                                                    SHA256SUMS, the Homebrew formula and
  *                                                    the winget manifests that name them
+ *   npm run release -w @passhold/cli -- --programs --ref cli-v<version>
+ *                                                    the same, from that tag: it must be the
+ *                                                    commit checked out, with nothing changed,
+ *                                                    and every file is dated at its commit, so
+ *                                                    two builds of one tag are the same bytes
  *   npm run release -w @passhold/cli -- --pin-node   the SHA-256 of each Node.js archive, from
  *                                                    nodejs.org's SHASUMS256.txt, into
  *                                                    packaging/node.json, to be read and committed
@@ -23,6 +28,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { tarGz, zip } from './archive.mjs';
 import {
   assetOf,
   folderOf,
@@ -33,6 +39,7 @@ import {
   npmManifest,
   programOf,
   sumsFile,
+  tagOf,
   TARGETS,
   wingetManifests,
   withoutSignature,
@@ -44,7 +51,10 @@ const { version } = JSON.parse(readFileSync(join(CLI, 'package.json'), 'utf8'));
 const OUT = join(ROOT, '.tmp/cli-release', version);
 const NODE_CACHE = join(ROOT, '.tmp/node-dist');
 const PINS = join(CLI, 'packaging/node.json');
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
+const ref = argv.includes('--ref') ? argv[argv.indexOf('--ref') + 1] : undefined;
+const git = (...rest) => execFileSync('git', rest, { cwd: ROOT, encoding: 'utf8' }).trim();
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const run = (command, rest, options = {}) => execFileSync(command, rest, { stdio: 'inherit', ...options });
 const say = (line) => process.stdout.write(`${line}\n`);
@@ -66,6 +76,29 @@ if (args.has('--pin-node')) {
   say(`Pinned ${Object.keys(archives).length} archives of Node.js ${pins.version} in packaging/node.json. Read the diff, then commit it.`);
   process.exit(0);
 }
+
+// --- what it is built from -------------------------------------------------------
+
+if (argv.includes('--ref') && !ref) throw new Error('--ref names a tag: --ref cli-v' + version + '.');
+if (ref) {
+  if (ref !== tagOf(version)) throw new Error(`The package is ${version}, so its tag is ${tagOf(version)}, not ${ref}.`);
+  // Under refs/tags/ by name: a branch called the same would pass for it otherwise.
+  let commit;
+  try {
+    commit = git('rev-parse', '--verify', '--quiet', `refs/tags/${ref}^{commit}`);
+  } catch {
+    throw new Error(`There is no tag ${ref} here.`);
+  }
+  if (commit !== git('rev-parse', 'HEAD')) throw new Error(`${ref} is ${commit.slice(0, 7)}, and ${git('rev-parse', '--short', 'HEAD')} is checked out: check out ${ref} first.`);
+  // What is built must be what the tag names: nothing changed beside it, nothing added that git would see.
+  const changed = git('status', '--porcelain');
+  if (changed) throw new Error(`Files differ from ${ref}:\n${changed}`);
+}
+// Every file in an archive is dated at the commit, never at the build: the same tag, the same bytes.
+// SOURCE_DATE_EPOCH is taken only for a try from the working tree; a tag's build has its commit's time and no other.
+const epoch = Number((!ref && process.env.SOURCE_DATE_EPOCH) || git('log', '-1', '--format=%ct', 'HEAD'));
+if (process.env.PASSHOLD_CODESIGN_IDENTITY) say('A Developer ID signature carries the time it was made: the Mac programs will not be the same bytes twice.');
+if (!ref) say(`Built from the working tree, not a tag: to try, not to publish. A release is built with --ref ${tagOf(version)}.`);
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
@@ -149,13 +182,15 @@ const work = join(OUT, 'work');
 const blob = join(work, 'passhold.blob');
 mkdirSync(work, { recursive: true });
 const seaConfig = join(work, 'sea.json');
-writeFileSync(seaConfig, JSON.stringify({ main: join(CLI, 'dist/sea/passhold.cjs'), output: blob, disableExperimentalSEAWarning: true, useSnapshot: false, useCodeCache: false }));
+// `main` is kept in the blob as written, so it is named from its own folder: a path of this computer's would be in every program, and a build in another folder would differ.
+writeFileSync(seaConfig, JSON.stringify({ main: 'passhold.cjs', output: blob, disableExperimentalSEAWarning: true, useSnapshot: false, useCodeCache: false }));
 
 // The blob is made by the very Node.js the programs are, run here: this computer's own build where it is one of them.
 const host = TARGETS.find((target) => target.node === `${process.platform === 'win32' ? 'win' : process.platform}-${process.arch}`);
 if (!host) throw new Error(`No program is made for this computer (${process.platform}-${process.arch}), so none can make the blob.`);
 const hostNode = unpack(await nodeArchive(host), host, join(work, 'host')).program;
-run(hostNode, ['--experimental-sea-config', seaConfig]);
+run(hostNode, ['--experimental-sea-config', seaConfig], { cwd: join(CLI, 'dist/sea') });
+if (readFileSync(blob).includes(ROOT)) throw new Error(`The blob names this computer's folder (${ROOT}).`);
 
 const sums = {};
 for (const target of TARGETS) {
@@ -182,8 +217,13 @@ for (const target of TARGETS) {
   copyFileSync(licence, join(folder, 'LICENSE.node.txt'));
   copyFileSync(join(CLI, 'README.md'), join(folder, 'README.md'));
   const asset = join(OUT, assetOf(version, target));
-  if (target.os === 'windows') run('zip', ['-qr', asset, folderOf(version, target)], { cwd: dirname(folder) });
-  else run('tar', ['-czf', asset, '-C', dirname(folder), folderOf(version, target)]);
+  // In this order in every archive, whatever order the disk would list them in.
+  const entries = [programOf(target), 'LICENSE', 'LICENSE.node.txt', 'README.md'].map((name) => ({
+    name: `${folderOf(version, target)}/${name}`,
+    bytes: readFileSync(join(folder, name)),
+    program: name === programOf(target),
+  }));
+  writeFileSync(asset, target.os === 'windows' ? zip(entries, epoch) : tarGz(entries, epoch));
   sums[assetOf(version, target)] = sha256(readFileSync(asset));
   say(`${assetOf(version, target)}  ${sums[assetOf(version, target)]}`);
 }
@@ -194,9 +234,11 @@ if (execFileSync(mine, ['--version'], { encoding: 'utf8' }).trim() !== version) 
 if (!/^.{24}$/.test(execFileSync(mine, ['generate', '--length', '24'], { encoding: 'utf8' }).trim())) throw new Error(`${mine} did not make a password.`);
 
 writeFileSync(join(OUT, 'SHA256SUMS'), sumsFile(sums));
+// Which commit and tag these were built from: a release is made only from a tag's build.
+writeFileSync(join(OUT, 'BUILT_FROM'), `${JSON.stringify({ tag: ref ?? null, commit: git('rev-parse', 'HEAD'), epoch }, null, 2)}\n`);
 mkdirSync(join(OUT, 'homebrew'), { recursive: true });
 writeFileSync(join(OUT, 'homebrew', `${FORMULA}.rb`), homebrewFormula(version, sums));
-for (const [path, text] of Object.entries(wingetManifests(version, sums, new Date().toISOString().slice(0, 10)))) {
+for (const [path, text] of Object.entries(wingetManifests(version, sums, new Date(epoch * 1000).toISOString().slice(0, 10)))) {
   mkdirSync(dirname(join(OUT, 'winget', path)), { recursive: true });
   writeFileSync(join(OUT, 'winget', path), text);
 }

@@ -7,7 +7,7 @@
  * stream carries only what was asked for — a value, a list, the line for
  * `eval` — so it can be piped.
  */
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fchmodSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readFileSync as readBytes } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { createSend, type Fetcher, type SignInProvider } from '@keyrook/account';
@@ -547,8 +547,8 @@ async function command(context: Context): Promise<number> {
       const data = references.length ? (await open(reachesShared(references.map(([, value]) => value!)))).data : null;
       const env: NodeJS.ProcessEnv = { ...given };
       for (const [key, value] of references) env[key] = resolve(data!, value!);
-      // The command gets what it asked for and no way to ask for more.
-      delete env.PASSHOLD_SESSION;
+      // The command gets what it asked for and no way to ask for more. Windows reads a variable's name in any case, so every spelling goes.
+      for (const key of Object.keys(env)) if (key.toUpperCase() === 'PASSHOLD_SESSION') delete env[key];
       return context.exec(program, programArgs, env);
     }
 
@@ -559,9 +559,17 @@ async function command(context: Context): Promise<number> {
       const data = wanted.length ? (await open(reachesShared(wanted.map((found) => found[1]!)))).data : null;
       const filled = template.replace(TEMPLATE, (_, reference: string) => resolve(data!, reference));
       const target = text(args, 'out');
-      // What is written holds secrets: for its owner alone.
-      if (target) writeFileSync(target, filled, { mode: 0o600 });
-      else context.out(filled);
+      // What is written holds secrets: for its owner alone. A mode given to open applies only to a file it makes,
+      // so one already there, readable by others, is closed to them before a byte of it is written.
+      if (target) {
+        const file = openSync(target, 'w', 0o600);
+        try {
+          if (process.platform !== 'win32') fchmodSync(file, 0o600);
+          writeFileSync(file, filled);
+        } finally {
+          closeSync(file);
+        }
+      } else context.out(filled);
       return 0;
     }
 

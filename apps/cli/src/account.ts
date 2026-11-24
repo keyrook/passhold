@@ -73,7 +73,7 @@ import {
 import { CliError, type Vault } from './reference.js';
 import { UNLOCK_MINUTES, type Store, type StoredAccount, type StoredFamily, type Unlocked } from './store.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const OFFICIAL_API = 'https://api.keyrook.com';
 
 /**

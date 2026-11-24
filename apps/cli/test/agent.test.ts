@@ -210,6 +210,40 @@ describe.skipIf(!existsSync(KIT) || !hasOpenSsh)('passhold ssh-agent', { timeout
     await agent.running;
     await running.close();
   });
+
+  it('listens at a socket named from this folder, and names it in full for ssh run from any other', async () => {
+    const { running, passhold } = await alice();
+    const relative = path(SOCKETS, `r${Math.random().toString(36).slice(2, 6)}.sock`).slice(process.cwd().length + 1);
+    const stop = new AbortController();
+    const said = { out: '', err: '' };
+    const agent = passhold(['ssh-agent', '--socket', relative, '--no-confirm'], [], '', { signal: stop.signal, out: (text) => void (said.out += text), err: (text) => void (said.err += text) });
+    for (let tries = 0; tries < 200 && !existsSync(relative); tries++) await new Promise((done) => setTimeout(done, 25));
+    stop.abort();
+    await agent;
+    expect(said.out).toBe(`SSH_AUTH_SOCK=${path(relative)}; export SSH_AUTH_SOCK;\n`);
+    expect(said.err).toContain(`IdentityAgent "${path(relative)}"`);
+    await running.close();
+  });
+
+  it('names a socket as given, from this folder, when its full path is longer than a socket takes', async () => {
+    const { running, passhold } = await alice();
+    const limit = process.platform === 'darwin' ? 103 : 107;
+    const folder = path(SOCKETS).slice(process.cwd().length + 1);
+    // Its full path just past the limit; the path given well inside it.
+    const padding = Math.max(1, limit + 4 - path(SOCKETS).length - '/.sock'.length);
+    const relative = `${folder}/${'l'.repeat(padding)}.sock`;
+    expect(Buffer.byteLength(path(relative))).toBeGreaterThan(limit);
+    expect(Buffer.byteLength(relative)).toBeLessThanOrEqual(limit);
+    const stop = new AbortController();
+    const said = { out: '', err: '' };
+    const agent = passhold(['ssh-agent', '--socket', relative, '--no-confirm'], [], '', { signal: stop.signal, out: (text) => void (said.out += text), err: (text) => void (said.err += text) });
+    for (let tries = 0; tries < 200 && !existsSync(relative); tries++) await new Promise((done) => setTimeout(done, 25));
+    stop.abort();
+    await agent;
+    expect(said.out).toBe(`SSH_AUTH_SOCK=${relative}; export SSH_AUTH_SOCK;\n`);
+    expect(said.err).toContain('too long for ssh to reach');
+    await running.close();
+  });
 });
 
 /** One message sent, the answer read. */

@@ -4,7 +4,7 @@
  * its logins sealed and sent as the extension sends them, then read back from
  * a terminal these tests play.
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { resolve as path } from 'node:path';
 import {
   AUTHENTICATOR,
@@ -134,6 +134,10 @@ describe.skipIf(!existsSync(KIT))('passhold, signed in', { timeout: 60_000 }, ()
     const ran = await passhold(['run', '--', process.execPath, '-e', 'process.stdout.write(`${process.env.DB_PASSWORD} ${process.env.PORT} ${process.env.PASSHOLD_SESSION}`); process.exit(7)'], [], '');
     expect(ran.code).toBe(7);
     expect(ran.out).toBe('db-Secret-1! undefined undefined');
+    // Nor under another spelling, which Windows reads as the same variable.
+    env.Passhold_Session = 'opens the unlock';
+    expect((await passhold(['run', '--', process.execPath, '-e', 'process.stdout.write(String(process.env.Passhold_Session))'])).out).toBe('undefined');
+    delete env.Passhold_Session;
     delete env.DB_PASSWORD;
     mkdirSync(home, { recursive: true });
     writeFileSync(path(home, 'app.env'), '# the app\nexport PORT="passhold://personal/Database/Port"\nPLAIN=as-it-is\n');
@@ -144,6 +148,9 @@ describe.skipIf(!existsSync(KIT))('passhold, signed in', { timeout: 60_000 }, ()
     const template = 'user: {{ passhold://personal/Database/username }}\npass: {{passhold://personal/Database/password}}\nkept: {{ not a reference }}\n';
     expect((await passhold(['inject'], [], template)).out).toBe('user: app\npass: db-Secret-1!\nkept: {{ not a reference }}\n');
     writeFileSync(path(home, 'config.tpl'), template);
+    // Over a file already there that anyone could read: it is closed to them first.
+    writeFileSync(path(home, 'config.yml'), 'old\n', { mode: 0o644 });
+    chmodSync(path(home, 'config.yml'), 0o644);
     expect((await passhold(['inject', '--in', path(home, 'config.tpl'), '--out', path(home, 'config.yml')])).code).toBe(0);
     expect(readFileSync(path(home, 'config.yml'), 'utf8')).toContain('pass: db-Secret-1!');
     expect(statSync(path(home, 'config.yml')).mode & 0o077).toBe(0);

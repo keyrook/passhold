@@ -92,6 +92,8 @@ ${block('linux', 'x64')}
 
   def install
     bin.install "passhold"
+    # The program is Node.js's too, whose licence goes with every copy.
+    prefix.install "LICENSE", "LICENSE.node.txt"
   end
 
   test do
@@ -103,6 +105,8 @@ end
 }
 
 const SCHEMA = '1.6.0';
+// A plain YAML value may not hold ": " or start with most punctuation; one in single quotes holds anything but its own quote, doubled.
+const quoted = (text) => `'${text.replaceAll("'", "''")}'`;
 const schema = (kind) => `# yaml-language-server: $schema=https://aka.ms/winget-manifest.${kind}.${SCHEMA}.schema.json\n`;
 
 /**
@@ -130,7 +134,7 @@ Commands:
   - passhold
 ReleaseDate: ${releasedOn}
 Installers:
-${windows.map(({ target, sum }) => `  - Architecture: ${target.arch}\n    InstallerUrl: ${urlOf(version, target)}\n    InstallerSha256: ${sum.toUpperCase()}`).join('\n')}
+${windows.map(({ target, sum }) => `  - Architecture: ${target.arch}\n    InstallerUrl: ${urlOf(version, target)}\n    InstallerSha256: ${quoted(sum.toUpperCase())}`).join('\n')}
 ManifestType: installer
 ManifestVersion: ${SCHEMA}
 `,
@@ -146,7 +150,7 @@ PackageUrl: ${HOMEPAGE}
 License: GPL-3.0-or-later
 LicenseUrl: ${REPOSITORY}/blob/main/LICENSE
 Copyright: Copyright (C) 2026 BRICK IT ALL LLC
-ShortDescription: ${SUMMARY}
+ShortDescription: ${quoted(SUMMARY)}
 Description: |-
   Reads, writes and injects the logins, cards, notes and SSH keys of a Passhold account, its family's shared vaults
   among them, by passhold:// references, and signs with its SSH keys as an SSH agent. A Premium feature of a Keyrook
