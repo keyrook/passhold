@@ -26,8 +26,8 @@ leaves out Alpine; Windows 10 or later on x64), check it against
 
 ```sh
 shasum -a 256 -c --ignore-missing SHA256SUMS  # sha256sum on Linux
-tar -xzf passhold-0.2.0-macos-arm64.tar.gz
-sudo mv passhold-0.2.0-macos-arm64/passhold /usr/local/bin/
+tar -xzf passhold-0.3.0-macos-arm64.tar.gz
+sudo mv passhold-0.3.0-macos-arm64/passhold /usr/local/bin/
 ```
 
 The Mac programs are not notarised by Apple yet: one downloaded in a browser
@@ -120,6 +120,27 @@ Authentication Agent service holds that pipe, stop the service first. It hands o
 none (`ssh-add` is refused), and it stops when Passhold is locked or the
 unlock ends. A key sealed with a passphrase is not offered: keep it in
 Passhold without one, since the vault seals it.
+
+## Machines and agents
+
+Keep API keys for scripts, CI runners and local tools in a separate sealed
+vault, apart from your personal vault, with per-item access control:
+
+```sh
+passhold machine init
+passhold machine vault create Dev
+passhold machine vault add Dev apikey title="Stripe test" key=-
+passhold machine invite                              # prints a phi_... invitation
+passhold machine enroll <phi_...>                    # on the machine itself
+passhold machine confirm <invitation-id> --name "Build box"
+passhold machine grant "Build box" Dev/"Stripe test" --uses request --approval each
+passhold approve                                     # answer a pending use request
+passhold mcp                                         # stdio MCP server on an enrolled machine
+```
+
+`passhold machine stop-all` pauses every machine immediately; `passhold machine
+remove <id>` cuts one off and tracks which keys were exposed until you rotate
+them.
 
 ## What stays on this computer
 

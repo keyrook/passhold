@@ -16,6 +16,7 @@ export function urlOf(version: string, target: Target): string;
 export function programOf(target: Target): string;
 export function nodeArchiveOf(nodeVersion: string, target: Target): string;
 export function nodeUrlOf(nodeVersion: string, target: Target): string;
+export function checkBuildNode(runningVersion: string, pinnedVersion: string, fromTag: boolean): void;
 export function npmManifest(version: string): Record<string, unknown> & { name: string; version: string; bin: Record<string, string>; files: string[]; license: string };
 export function homebrewFormula(version: string, sums: Record<string, string>): string;
 export function wingetManifests(version: string, sums: Record<string, string>, releasedOn: string): Record<string, string>;

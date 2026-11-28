@@ -14,6 +14,7 @@ import { createSend, type Fetcher, type SignInProvider } from '@keyrook/account'
 import {
   attachFile,
   attachmentsOf,
+  boundsAllowCommand,
   codeFitsLogin,
   deleteStoredFile,
   detachFile,
@@ -41,8 +42,19 @@ import {
 } from '@passhold/core';
 import { Account, OFFICIAL_API, VERSION, type Opened, type ProviderFlow } from './account.js';
 import { agent } from './agent.js';
+import { runApprove } from './approve.js';
 import { listen, openBrowser, type Listener } from './browser.js';
 import { adding, assignments, draftWith, editing, KINDS, kindOf, type Kind } from './edit.js';
+import {
+  ensureMachineConfirmed,
+  envMachineToken,
+  hasPassholdSession,
+  loadMachineIdentity,
+  pullMachineIntoCache,
+  resolveMachineReference,
+  runMachine,
+} from './machine.js';
+import { runMcpServer } from './mcp/server.js';
 import {
   CliError,
   fieldOf,
@@ -91,6 +103,10 @@ export interface Context {
   signal?: AbortSignal;
   /** Shows an address in the person's browser. The tests play the browser. */
   browse?(url: string, listener: Listener, flow: ProviderFlow): void;
+  /** True only when attached to an interactive terminal (`passhold approve` requires this). */
+  isTTY?: boolean;
+  /** Optional line stream feeding `passhold mcp` in tests instead of `process.stdin`. */
+  mcpStream?: AsyncIterable<string>;
   fetcher?: Fetcher;
   now?(): number;
 }
@@ -122,6 +138,9 @@ const USAGE = `passhold ${VERSION}
   passhold file get <item> <file> [--out <path>]
   passhold file rm <item> <file>
   passhold ssh-agent [--socket <path>] [--no-confirm]
+  passhold approve [--recovery-key | --with-browser] [--machine <id>]
+  passhold machine <enroll|status|pull|init|list|invite|confirm|token|grant|withdraw|rekey|remove|stop-all|resume|renew|forget|exposed|audit|move|send-back|reset|vault> …
+  passhold mcp
 
 A reference is passhold://vault/item/field. The vault's own is "${OWN_VAULT}",
 a family's shared vault is its name; an item is its id or its name; a field
@@ -157,7 +176,7 @@ interface Args {
 }
 
 /** Flags that take no value; any other takes the word after it, or what follows `=`. */
-const SWITCHES = new Set(['google', 'github', 'json', 'raw', 'recovery-key', 'with-browser', 'password', 'no-lower', 'no-upper', 'no-digits', 'no-symbols', 'ambiguous', 'generate', 'no-confirm', 'help', 'version']);
+const SWITCHES = new Set(['google', 'github', 'json', 'raw', 'recovery-key', 'with-browser', 'password', 'no-lower', 'no-upper', 'no-digits', 'no-symbols', 'ambiguous', 'generate', 'no-confirm', 'wait', 'no-rekey', 'keys-replaced', 'help', 'version']);
 
 function parse(argv: string[]): Args {
   const args: Args = { positional: [], flags: new Map(), rest: [] };
@@ -374,6 +393,48 @@ async function command(context: Context): Promise<number> {
     }
 
     case 'list': {
+      // Machine mode works on every plan (free or paid) without PASSHOLD_SESSION.
+      const useMachineMode = Boolean(envMachineToken(context.env)) || (!hasPassholdSession(context.env) && store.machine() !== null);
+      if (useMachineMode) {
+        const loaded = await loadMachineIdentity(store, context.env);
+        if (!loaded) throw new CliError('No machine enrolled and PASSHOLD_MACHINE_TOKEN is not set.');
+        const client = account.machineClient();
+        const confirmed = await ensureMachineConfirmed(client, store, loaded, now());
+        const cache = await pullMachineIntoCache(client, store, context.env, confirmed, now());
+        const only = text(args, 'vault')?.toLowerCase();
+        const kind = text(args, 'kind');
+        const words = (text(args, 'search') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+        const items = Object.values(cache.items)
+          .filter((entry) => !entry.deleted && (entry.grant.expiresAt === null || entry.grant.expiresAt > now()))
+          .filter((entry) => {
+            if (only && entry.vault.toLowerCase() !== only && !(entry.listing.ref ?? '').toLowerCase().startsWith(`passhold://${only}/`)) return false;
+            if (kind && (entry.listing.kind ?? 'apikey') !== kind) return false;
+            const haystack = [entry.listing.title ?? entry.item, entry.listing.service ?? '', entry.listing.environment ?? '', ...entry.delivery.hosts].join(' ').toLowerCase();
+            return words.every((w) => haystack.includes(w));
+          });
+        if (args.flags.has('json')) {
+          context.out(
+            `${JSON.stringify(
+              items.map((entry) => ({
+                id: entry.item,
+                vault: entry.vault,
+                kind: entry.listing.kind ?? 'apikey',
+                name: entry.listing.title ?? entry.item,
+                approval: entry.grant.approval,
+                uses: entry.grant.uses,
+                reference: entry.listing.ref ?? `passhold://${entry.vault}/${entry.item}`,
+              })),
+              null,
+              2,
+            )}\n`,
+          );
+        } else {
+          for (const entry of items) {
+            context.out(`${[entry.item, entry.listing.kind ?? 'apikey', entry.listing.title ?? entry.item, entry.grant.approval, entry.vault].join('\t')}\n`);
+          }
+        }
+        return 0;
+      }
       const only = text(args, 'vault');
       const { data } = await open(only === undefined || reachesShared([`${SCHEME}${encodeURIComponent(only)}/`]));
       const words = (text(args, 'search') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
@@ -544,11 +605,32 @@ async function command(context: Context): Promise<number> {
       if (!program) throw new CliError('Say what to run: passhold run -- <command> [arguments]');
       const given: NodeJS.ProcessEnv = { ...context.env, ...envFile(text(args, 'env-file')) };
       const references = Object.entries(given).filter(([, value]) => value !== undefined && isReference(value));
-      const data = references.length ? (await open(reachesShared(references.map(([, value]) => value!)))).data : null;
       const env: NodeJS.ProcessEnv = { ...given };
-      for (const [key, value] of references) env[key] = resolve(data!, value!);
+      const useMachineMode = Boolean(envMachineToken(context.env)) || (!hasPassholdSession(context.env) && store.machine() !== null);
+      if (references.length && useMachineMode) {
+        const loaded = await loadMachineIdentity(store, context.env);
+        if (!loaded) throw new CliError('No machine enrolled and PASSHOLD_MACHINE_TOKEN is not set.');
+        const client = account.machineClient();
+        const confirmed = await ensureMachineConfirmed(client, store, loaded, now());
+        const cache = await pullMachineIntoCache(client, store, context.env, confirmed, now());
+        for (const [key, value] of references) {
+          const resolved = resolveMachineReference(cache, value!);
+          if (!resolved.item.grant.uses.includes('run')) {
+            throw new CliError(`"${resolved.item.listing.title || resolved.item.item}" is not granted for running commands.`);
+          }
+          const check = boundsAllowCommand(resolved.item.grant.bounds, [program, ...programArgs]);
+          if (!check.ok) throw new CliError(check.reason);
+          env[key] = resolved.value;
+        }
+      } else {
+        const data = references.length ? (await open(reachesShared(references.map(([, value]) => value!)))).data : null;
+        for (const [key, value] of references) env[key] = resolve(data!, value!);
+      }
       // The command gets what it asked for and no way to ask for more. Windows reads a variable's name in any case, so every spelling goes.
-      for (const key of Object.keys(env)) if (key.toUpperCase() === 'PASSHOLD_SESSION') delete env[key];
+      for (const key of Object.keys(env)) {
+        const upper = key.toUpperCase();
+        if (upper === 'PASSHOLD_SESSION' || upper === 'PASSHOLD_MACHINE_TOKEN') delete env[key];
+      }
       return context.exec(program, programArgs, env);
     }
 
@@ -556,8 +638,19 @@ async function command(context: Context): Promise<number> {
       const source = text(args, 'in');
       const template = source ? readFileSync(source, 'utf8') : await context.input();
       const wanted = [...template.matchAll(TEMPLATE)];
-      const data = wanted.length ? (await open(reachesShared(wanted.map((found) => found[1]!)))).data : null;
-      const filled = template.replace(TEMPLATE, (_, reference: string) => resolve(data!, reference));
+      const useMachineMode = Boolean(envMachineToken(context.env)) || (!hasPassholdSession(context.env) && store.machine() !== null);
+      let filled: string;
+      if (wanted.length && useMachineMode) {
+        const loaded = await loadMachineIdentity(store, context.env);
+        if (!loaded) throw new CliError('No machine enrolled and PASSHOLD_MACHINE_TOKEN is not set.');
+        const client = account.machineClient();
+        const confirmed = await ensureMachineConfirmed(client, store, loaded, now());
+        const cache = await pullMachineIntoCache(client, store, context.env, confirmed, now());
+        filled = template.replace(TEMPLATE, (_, reference: string) => resolveMachineReference(cache, reference).value);
+      } else {
+        const data = wanted.length ? (await open(reachesShared(wanted.map((found) => found[1]!)))).data : null;
+        filled = template.replace(TEMPLATE, (_, reference: string) => resolve(data!, reference));
+      }
       const target = text(args, 'out');
       // What is written holds secrets: for its owner alone. A mode given to open applies only to a file it makes,
       // so one already there, readable by others, is closed to them before a byte of it is written.
@@ -644,6 +737,23 @@ async function command(context: Context): Promise<number> {
       say(`Opens ${send.opensLeft} time${send.opensLeft === 1 ? '' : 's'}, until ${new Date(send.expiresAt).toISOString()}. The link is shown only now: nothing keeps it.`);
       return 0;
     }
+
+    case 'approve':
+      return runApprove(context, {
+        store,
+        account,
+        now,
+        say,
+        recoveryKey: args.flags.has('recovery-key'),
+        withBrowser: args.flags.has('with-browser'),
+        ...(text(args, 'machine') ? { machineId: text(args, 'machine') } : {}),
+      });
+
+    case 'machine':
+      return runMachine(context, args.positional, { store, account, now, say, flags: args.flags });
+
+    case 'mcp':
+      return runMcpServer(context, { store, account, now, say });
 
     default:
       throw new CliError(`No command "${name}". Run: passhold help`);

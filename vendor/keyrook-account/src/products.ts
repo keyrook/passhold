@@ -18,7 +18,7 @@ export interface Product {
 }
 
 export const PRODUCTS: readonly Product[] = [
-  { id: AUTHENTICATOR, name: 'Keyrook Authenticator' },
+  { id: AUTHENTICATOR, name: 'Keyrook Authenticator', family: true },
   { id: PASSHOLD, name: 'Passhold', family: true },
 ];
 
@@ -26,4 +26,7 @@ export const PRODUCTS: readonly Product[] = [
 export const productNameOf = (id: string): string => PRODUCTS.find((product) => product.id === id)?.name ?? id;
 
 /** The products a family shares collections of, the first of them the one a new family starts with. */
-export const familyProducts: readonly string[] = PRODUCTS.filter((product) => product.family).map((product) => product.id);
+export const familyProducts: readonly string[] = [
+  ...PRODUCTS.filter((product) => product.family && product.id === PASSHOLD).map((product) => product.id),
+  ...PRODUCTS.filter((product) => product.family && product.id !== PASSHOLD).map((product) => product.id),
+];

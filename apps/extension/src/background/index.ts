@@ -194,13 +194,17 @@ import {
   pageView,
   syncOwnRecords,
   syncFamilies as syncFamilyRound,
+  toStoredAgentsState,
   type VaultTurn,
   type Plan,
+  type StoredAgentsState,
 } from '@passhold/core';
 import {
   AUTHENTICATOR,
   createSend,
+  moveAgentsToNewKey,
   openLink,
+  type OwnerProofFields,
   createAccount as createKeyrookAccount,
   createAccountRoot,
   createProviderAccount as createProvider,
@@ -314,6 +318,35 @@ import {
 } from '../lib/storage.js';
 import { CLIPBOARD_ALARM, clearClipboardLater, clearClipboardNow } from './clipboard.js';
 import { accountFailure } from '../lib/failure.js';
+import {
+  agentsApproveUse,
+  agentsAudit,
+  agentsBeginEnrollment,
+  agentsConfirmEnrollment,
+  agentsCreateToken,
+  agentsCreateVault,
+  agentsDenyRequest,
+  agentsEditItem,
+  agentsForget,
+  agentsGrantItem,
+  agentsMoveToNewKey,
+  agentsPendingCount,
+  agentsPutItem,
+  agentsRekey,
+  agentsRemoveMachine,
+  agentsRenewMachine,
+  agentsResumeMachine,
+  agentsReviewEnrollment,
+  agentsSendBack,
+  agentsSettle,
+  agentsStartAfresh,
+  agentsStopAll,
+  agentsTurnOn,
+  agentsView,
+  agentsWithdrawItem,
+  readArchivedAgentsToVault,
+  type AgentWorkerContext,
+} from './agents.js';
 import {
   acceptPairing,
   accountKeys,
@@ -480,7 +513,32 @@ async function lock(): Promise<void> {
   cached = null;
   await clearSession();
   await chrome.alarms.clear(AUTO_LOCK_ALARM);
+  void setAgentsBadge(0);
   broadcast();
+}
+
+async function setAgentsBadge(count: number): Promise<void> {
+  try {
+    await chrome.action?.setBadgeText({ text: count > 0 ? String(count > 99 ? '99+' : count) : '' });
+    if (count > 0) await chrome.action?.setBadgeBackgroundColor({ color: '#2563eb' });
+  } catch {
+    // Environments without a toolbar action ignore badge updates.
+  }
+}
+
+function noteAgentsOverview<T extends { status: string; requests?: readonly unknown[] }>(overview: T): T {
+  void setAgentsBadge(overview.status === 'open' ? (overview.requests?.length ?? 0) : 0);
+  return overview;
+}
+
+async function refreshAgentsBadge(): Promise<void> {
+  const open = await current();
+  if (!open?.data.account?.tokens || !open.data.account.agents) {
+    await setAgentsBadge(0);
+    return;
+  }
+  const { count } = await withAgents((ctx) => agentsPendingCount(ctx)).catch(() => ({ count: 0 }));
+  await setAgentsBadge(count);
 }
 
 /**
@@ -1328,6 +1386,9 @@ interface Authenticated {
   passkey?: string;
   /** Passhold's key before this sign-in replaced it (the recovery key leaked): held until every record is sent again. */
   previousKey?: CryptoKey | null;
+  previousKeyGeneration?: number;
+  agentsMovePending?: boolean;
+  agents?: StoredAgentsState;
 }
 
 const addressOf = (raw: string) => String(raw).trim().toLowerCase().slice(0, 320);
@@ -1398,13 +1459,40 @@ async function settled(
   api: HttpSyncAdapter,
   opened: OpenedProductKey,
   resume: AccountLink | null,
-): Promise<{ product: ProductKey; previousKey: CryptoKey | null }> {
+): Promise<{
+  product: ProductKey;
+  previousKey: CryptoKey | null;
+  previousKeyGeneration?: number;
+  agentsMovePending?: boolean;
+  agents?: StoredAgentsState;
+}> {
   if (opened.status === 'open' && opened.mustReplace) {
     const replaced = await replaceProductKey(api, opened.productKey);
     // The link's key, sealed again under the new key while the one before still opens it; with no link, or a plan
     // that does not hold one, there is nothing to seal.
     await openLink(api, replaced.productKey, AUTHENTICATOR, replaced.previousKey ?? undefined).catch(() => undefined);
-    return { product: replaced.productKey, previousKey: replaced.previousKey };
+    // If agents were turned on under the replaced key, try moving them now while the old key is in hand;
+    // if interrupted or offline, keep `previousKey` + `previousKeyGeneration` with `agentsMovePending: true`.
+    let agents = resume?.agents;
+    let agentsMovePending = false;
+    try {
+      const state = await api.agents(resume?.agents?.checkpoint.version ?? 0);
+      if (state.authority && state.authority.keyGeneration === opened.productKey.keyGeneration) {
+        const moved = await moveAgentsToNewKey(api, opened.productKey, replaced.productKey, resume?.agents?.checkpoint ?? null);
+        agents = toStoredAgentsState(moved, resume?.agents);
+      }
+    } catch (error) {
+      if (!(error instanceof SyncHttpError && (error.code === 'not_offered' || error.status === 404 || error.status === 501))) {
+        agentsMovePending = true;
+      }
+    }
+    return {
+      product: replaced.productKey,
+      previousKey: replaced.previousKey,
+      previousKeyGeneration: opened.productKey.keyGeneration,
+      ...(agentsMovePending ? { agentsMovePending: true } : {}),
+      ...(agents ? { agents } : {}),
+    };
   }
   if (opened.status === 'open' || opened.status === 'joined') return { product: opened.productKey, previousKey: null };
   if (opened.status === 'awaiting-confirmation') {
@@ -1489,11 +1577,22 @@ async function withPassword(
     opened = made.opened;
     newRecoveryKey = made.recoveryKey;
   }
-  const { product, previousKey } = await settled(session.api, opened, resume);
+  const { product, previousKey, previousKeyGeneration, agentsMovePending, agents } = await settled(session.api, opened, resume);
   const sheet = newRecoveryKey ?? typedSheet;
   const kit = sheet ? await kitMade(session.api, sheet, newRecoveryKey !== null) : kitAfter(resume?.kit ?? null, await session.api.accountKeys());
   // Signed in with its password, the account has one — whatever the link held before.
-  return { answer: answered(answer, session.tokens()), product, previousKey, deviceId, passwordless: false, ...(kit ? { kit } : {}), newRecoveryKey };
+  return {
+    answer: answered(answer, session.tokens()),
+    product,
+    previousKey,
+    ...(previousKeyGeneration !== undefined ? { previousKeyGeneration } : {}),
+    ...(agentsMovePending ? { agentsMovePending: true } : {}),
+    ...(agents ? { agents } : {}),
+    deviceId,
+    passwordless: false,
+    ...(kit ? { kit } : {}),
+    newRecoveryKey,
+  };
 }
 
 // --- A sign-in's second step ----------------------------------------------------------
@@ -1665,10 +1764,20 @@ async function withSheet(email: string, code: string, rawKey: string, password: 
       (answer) => (session = connect(answer)).api,
     );
     const api = session!.api;
-    const { product, previousKey } = await settled(api, recovered.opened, await linkFor(recovered.session.account.id));
+    const { product, previousKey, previousKeyGeneration, agentsMovePending, agents } = await settled(api, recovered.opened, await linkFor(recovered.session.account.id));
     // The key just worked: kept, so it can be seen again, and already put away.
     const kit = await kitMade(api, recoveryKey, false);
-    return { answer: answered(recovered.session, session!.tokens()), product, previousKey, deviceId, passwordless: false, kit };
+    return {
+      answer: answered(recovered.session, session!.tokens()),
+      product,
+      previousKey,
+      ...(previousKeyGeneration !== undefined ? { previousKeyGeneration } : {}),
+      ...(agentsMovePending ? { agentsMovePending: true } : {}),
+      ...(agents ? { agents } : {}),
+      deviceId,
+      passwordless: false,
+      kit,
+    };
   } catch (error) {
     // Said alike for an unknown address and a wrong key, as the server says it.
     if (error instanceof SyncHttpError && error.code === 'invalid_credentials') fail('error.accountKitWrong');
@@ -1685,6 +1794,12 @@ async function linkOf(auth: Authenticated, resume: AccountLink | null): Promise<
   const fields = await keyFields(auth.product);
   const previous = auth.previousKey ? await exportDataKey(auth.previousKey) : null;
   const same = resume?.accountId === fields.accountId && (resume.productKey === fields.productKey || (previous !== null && resume.productKey === previous)) ? resume : null;
+  const nextPreviousKey = previous ?? (same?.productKey === fields.productKey ? same.previousKey : null);
+  const nextPreviousGen =
+    auth.previousKeyGeneration ??
+    (same?.productKey === fields.productKey ? same.previousKeyGeneration : undefined);
+  const nextAgentsMove = auth.agentsMovePending ?? (same?.productKey === fields.productKey ? same.agentsMovePending : undefined);
+  const nextAgents = auth.agents ?? same?.agents;
   return {
     email: auth.answer.account.email,
     // Given on account.keyrook.com: as a sign-in says it, and every sync after. A server from before, or a
@@ -1692,7 +1807,10 @@ async function linkOf(auth: Authenticated, resume: AccountLink | null): Promise<
     name: auth.answer.account.name === undefined ? (same?.name ?? null) : cleanAccountName(auth.answer.account.name),
     deviceId: auth.deviceId,
     ...fields,
-    previousKey: previous ?? (same?.productKey === fields.productKey ? same.previousKey : null),
+    previousKey: nextPreviousKey,
+    ...(nextPreviousKey && nextPreviousGen !== undefined ? { previousKeyGeneration: nextPreviousGen } : {}),
+    ...(nextAgentsMove ? { agentsMovePending: true } : {}),
+    ...(nextAgents ? { agents: nextAgents } : {}),
     tokens: { accessToken: auth.answer.accessToken, refreshToken: auth.answer.refreshToken },
     serverRev: same?.serverRev ?? 0,
     epoch: same?.epoch ?? null,
@@ -3280,6 +3398,10 @@ async function openKept(id: string, secret: string): Promise<{ added: number }> 
           if (kept) found.wallet.push(kept);
         }
       }
+      // Recover items kept in archived agent vaults too (`openArchivedAgents` + `readArchivedAgentVault`).
+      const archivedAgents = await readArchivedAgentsToVault(api, archive, link.accountId, old);
+      found.items.push(...archivedAgents.items);
+      found.wallet.push(...archivedAgents.wallet);
       return found;
     });
     const added = await serial(async () => {
@@ -3837,7 +3959,7 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
       return createAccount(request.email, request.code, request.password);
 
     case 'account/signOut':
-      return signOut();
+      return signOut().then(() => void setAgentsBadge(0));
 
     case 'account/draftKit':
       return draftKit();
@@ -4185,7 +4307,136 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
       if (policy?.clearClipboardSeconds) await clearClipboardLater(policy.clearClipboardSeconds * 1000);
       return;
     }
+
+    case 'agents/view':
+      return withAgents((ctx) => agentsView(ctx)).then(noteAgentsOverview);
+    case 'agents/pending':
+      return withAgents((ctx) => agentsPendingCount(ctx)).then((res) => {
+        void setAgentsBadge(res.count);
+        return res;
+      });
+    case 'agents/turnOn':
+      return withAgents((ctx) => agentsTurnOn(ctx)).then(noteAgentsOverview);
+    case 'agents/vaultCreate':
+      return withAgents((ctx) => agentsCreateVault(ctx, request.name));
+    case 'agents/itemPut':
+      return withAgents((ctx) => agentsPutItem(ctx, request.vaultId, request.itemId, request.value));
+    case 'agents/itemEdit':
+      return withAgents((ctx) =>
+        agentsEditItem(ctx, {
+          vaultId: request.vaultId,
+          itemId: request.itemId,
+          title: request.title,
+          key: request.key,
+          hosts: request.hosts,
+        }),
+      );
+    case 'agents/enrollBegin':
+      return withAgents((ctx) => agentsBeginEnrollment(ctx));
+    case 'agents/enrollReview':
+      return withAgents((ctx) => agentsReviewEnrollment(ctx, request.invitationId));
+    case 'agents/enrollConfirm':
+      return withAgents(async (ctx) =>
+        agentsConfirmEnrollment(ctx, request.candidate, request.name, request.days, await ownerProofFromPassword(request.password)),
+      );
+    case 'agents/tokenCreate':
+      return withAgents(async (ctx) =>
+        agentsCreateToken(ctx, request.name, request.days, await ownerProofFromPassword(request.password)),
+      );
+    case 'agents/grant':
+      return withAgents((ctx) =>
+        agentsGrantItem(ctx, {
+          machineId: request.machineId,
+          vaultId: request.vaultId,
+          itemId: request.itemId,
+          uses: request.uses,
+          approval: request.approval,
+          ...(request.session !== undefined ? { session: request.session } : {}),
+          ...(request.bounds ? { bounds: request.bounds } : {}),
+          expiresAt: request.expiresAt ?? null,
+        }),
+      );
+    case 'agents/withdraw':
+      return withAgents((ctx) => agentsWithdrawItem(ctx, request.machineId, request.vaultId, request.itemId));
+    case 'agents/approveUse':
+      return withAgents((ctx) => agentsApproveUse(ctx, request.machineId, request.requestId, request.mode)).then(noteAgentsOverview);
+    case 'agents/deny':
+      return withAgents((ctx) => agentsDenyRequest(ctx, request.machineId, request.requestId)).then(noteAgentsOverview);
+    case 'agents/remove':
+      return withAgents(async (ctx) =>
+        agentsRemoveMachine(ctx, request.machineId, request.password ? await ownerProofFromPassword(request.password) : null),
+      ).then(noteAgentsOverview);
+    case 'agents/stopAll':
+      return withAgents(async (ctx) => agentsStopAll(ctx, await ownerProofFromPassword(request.password))).then(noteAgentsOverview);
+    case 'agents/resume':
+      return withAgents(async (ctx) => agentsResumeMachine(ctx, request.machineId, await ownerProofFromPassword(request.password)));
+    case 'agents/renew':
+      return withAgents(async (ctx) =>
+        agentsRenewMachine(ctx, request.machineId, request.days, await ownerProofFromPassword(request.password), request.token),
+      );
+    case 'agents/rekey':
+      return withAgents((ctx) => agentsRekey(ctx));
+    case 'agents/settle':
+      return withAgents((ctx) => agentsSettle(ctx));
+    case 'agents/forget':
+      return withAgents(async (ctx) =>
+        agentsForget(ctx, request.machineId, await ownerProofFromPassword(request.password), request.keysReplaced),
+      );
+    case 'agents/audit':
+      return withAgents((ctx) => agentsAudit(ctx, request.since));
+    case 'agents/move':
+      return withAgents((ctx) => agentsMoveToNewKey(ctx));
+    case 'agents/sendBack':
+      return withAgents((ctx) => agentsSendBack(ctx));
+    case 'agents/reset':
+      return withAgents(async (ctx) => agentsStartAfresh(ctx, await ownerProofFromPassword(request.password)));
   }
+}
+
+async function ownerProofFromPassword(password: string): Promise<OwnerProofFields> {
+  const link = (await requireUnlocked()).data.account;
+  if (!link) fail('error.accountNone');
+  const { kdf } = await prelogin(link.email);
+  const keys = await deriveAccountKeys(String(password), kdf);
+  return { authHash: keys.authHash };
+}
+
+async function withAgents<T>(run: (ctx: AgentWorkerContext) => Promise<T>): Promise<T> {
+  const open = await requireUnlocked();
+  const link = open.data.account;
+  const productKey = await productKeyOf(link);
+  if (!link || !link.tokens || !productKey) fail('error.accountNone');
+  const previous: ProductKey | null =
+    link.previousKey && link.previousKeyGeneration
+      ? {
+          accountId: productKey.accountId,
+          product: PRODUCT,
+          key: await importDataKey(link.previousKey),
+          keyGeneration: link.previousKeyGeneration,
+          root: productKey.root,
+          rootGeneration: productKey.rootGeneration,
+          sheetVerifiedAt: productKey.sheetVerifiedAt,
+        }
+      : null;
+  const save = async (agents: StoredAgentsState, options?: { clearMove?: boolean }) => {
+    await serial(async () => {
+      const currentVault = await requireUnlocked();
+      const acct = currentVault.data.account;
+      if (!acct || acct.accountId !== productKey.accountId) return;
+      if (!options?.clearMove && JSON.stringify(acct.agents) === JSON.stringify(agents)) return;
+      let nextAccount: AccountLink;
+      if (options?.clearMove) {
+        const { previousKeyGeneration: _, agentsMovePending: __, ...rest } = acct;
+        nextAccount = { ...rest, previousKey: null, agents };
+      } else {
+        nextAccount = { ...acct, agents };
+      }
+      await commit(currentVault, { ...currentVault.data, account: nextAccount }, true);
+    });
+  };
+  return withApi((api) =>
+    run({ api, productKey, previous, deviceId: link.deviceId, stored: link.agents, save }),
+  ).catch(accountFailure);
 }
 
 // --- requests from the content script, in some web page ---------------------------------
@@ -4463,7 +4714,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === SYNC_ALARM) {
     void (async () => {
-      if ((await current())?.data.account?.tokens) await syncNow().catch(() => undefined);
+      if ((await current())?.data.account?.tokens) {
+        await syncNow().catch(() => undefined);
+        await refreshAgentsBadge().catch(() => undefined);
+      }
     })();
     return;
   }
@@ -4476,7 +4730,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     }
     if (policy && policy.autoLockMinutes > 0 && lastActive && Date.now() - lastActive >= policy.autoLockMinutes * 60_000) {
       await lock();
+      return;
     }
+    await refreshAgentsBadge().catch(() => undefined);
   })();
 });
 

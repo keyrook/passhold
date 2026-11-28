@@ -8,9 +8,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { resolve as path } from 'node:path';
 import { build } from 'vite';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
   assetOf,
+  checkBuildNode,
   homebrewFormula,
   nodeArchiveOf,
   npmManifest,
@@ -108,6 +109,25 @@ describe('a release of the command line', () => {
     for (const name of Object.keys(pins.archives)) expect(TARGETS.map((target) => nodeArchiveOf(pins.version, target))).toContain(name);
     for (const sum of Object.values(pins.archives)) expect(sum).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  const otherNode = pins.version.replace(/\d+$/, (patch) => String(Number(patch) + 1));
+  const nodeMismatch = `This build is running on Node.js ${otherNode}. The version pinned in packaging/node.json is ${pins.version}. Archive bytes depend on the zlib of the Node.js running this script.`;
+
+  it('refuses to build from a tag on another Node.js patch version', () => {
+    expect(() => checkBuildNode(otherNode, pins.version, true)).toThrow(nodeMismatch);
+  });
+
+  it('warns and carries on when trying a build on another Node.js patch version', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      checkBuildNode(pins.version, pins.version, true);
+      checkBuildNode(pins.version, pins.version, false);
+      checkBuildNode(otherNode, pins.version, false);
+      expect(warn.mock.calls).toEqual([[`Warning: ${nodeMismatch}`]]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe('a Windows program, signed by Node.js', () => {
@@ -163,7 +183,7 @@ describe('a release archive', () => {
     return (name: string) => ({ bytes: readFileSync(path(into, name)), stat: statSync(path(into, name)) });
   }
 
-  it('is the same bytes from the same files, whenever and wherever it is made', () => {
+  it('is the same bytes from the same files and date under the same Node.js', () => {
     expect(tarGz(entries, epoch).equals(tarGz(entries.map((entry) => ({ ...entry, bytes: Buffer.from(entry.bytes) })), epoch))).toBe(true);
     expect(zip(entries, epoch).equals(zip(entries, epoch))).toBe(true);
     expect(tarGz(entries, epoch).equals(tarGz(entries, epoch + 2))).toBe(false);

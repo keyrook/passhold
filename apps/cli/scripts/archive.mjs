@@ -1,12 +1,13 @@
 /**
- * A release's archives, the same bytes from the same files on any computer:
- * the system's own `tar` and `zip` write each file's time, owner and group,
+ * A release's archives, the same bytes from the same files with the pinned
+ * Node.js. The system's own `tar` and `zip` write each file's time, owner and group,
  * the order the disk lists them in, and (gzip) which system packed them, so
  * two builds of one tag would never have one SHA-256.
  *
  * Here every entry is dated at the commit the release is built from
  * (SOURCE_DATE_EPOCH), owned by nobody, in the order given, with 0755 for a
- * program and 0644 for anything else.
+ * program and 0644 for anything else. The zlib of the Node.js running the
+ * build writes the compressed bytes, so a change there can change the SHA-256.
  */
 import { crc32, deflateRawSync, gzipSync } from 'node:zlib';
 

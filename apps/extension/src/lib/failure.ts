@@ -45,6 +45,9 @@ export function accountFailure(error: unknown): never {
     const wait = Math.max(1, Math.ceil(refusal.retryAfter ?? (Number(said?.filled) || 60)));
     if (said?.key === 'error.accountBusy' || said?.key === 'error.accountCodeWait') fail(said.key, { count: wait });
     if (said?.key === 'error.startOverTooOften' || said?.key === 'error.startOverWaiting') fail(said.key, { day: said.filled ?? '' });
+    if (said?.key === 'error.agentItemLimit' || said?.key === 'error.agentVaultLimit' || said?.key === 'error.agentMachineLimit') {
+      fail(said.key, { limit: said.filled ?? '' });
+    }
     if (said?.key) fail(said.key);
     // A refresh the server refused: the session is gone.
     if (refusal.status === 401 && error instanceof SyncHttpError && refusal.code === 'unauthorized') fail('error.accountSignedOut');

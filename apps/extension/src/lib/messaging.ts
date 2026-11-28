@@ -1,5 +1,28 @@
-import type { SendCreated, SendRequest, SendView } from '@keyrook/account';
-import type { Attachment, AccountPasskeyAnswer, AccountPasskeyOptions, CardNetwork, DeviceCredential, EmergencyView, ShownCode, ImportedLogin, LoginDraft, LoginItem, PasskeyFor, PasswordName, SignInProvider, VaultData, VaultSecret, VaultPlace, VaultSettings, WalletDraft, WalletItem } from '@passhold/core';
+import type { MachineApproval, MachineCandidate, MachineUse, SendCreated, SendRequest, SendView } from '@keyrook/account';
+import type {
+  AccountPasskeyAnswer,
+  AccountPasskeyOptions,
+  AgentItemValue,
+  AgentMachineSummary,
+  Attachment,
+  CardNetwork,
+  DeviceCredential,
+  EmergencyView,
+  ExposedKeyEntry,
+  ImportedLogin,
+  LoginDraft,
+  LoginItem,
+  PasskeyFor,
+  PasswordName,
+  ShownCode,
+  SignInProvider,
+  VaultData,
+  VaultPlace,
+  VaultSecret,
+  VaultSettings,
+  WalletDraft,
+  WalletItem,
+} from '@passhold/core';
 import type { Values } from '../i18n/format.js';
 import type { MessageKey } from '../i18n/locales/en.js';
 import { askAccountData, STARTS_ACCOUNT } from './platform.js';
@@ -502,7 +525,113 @@ export type Request =
   | { type: 'pending/answer'; id: string; answer: 'save' | 'never' | 'dismiss' }
   | { type: 'clipboard/copied' }
   /** A person clicked or typed in one of Passhold's pages: the idle lock starts again. */
-  | { type: 'activity' };
+  | { type: 'activity' }
+  // --- Agents (machines & agent vaults) ---
+  | { type: 'agents/view' }
+  | { type: 'agents/pending' }
+  | { type: 'agents/turnOn' }
+  | { type: 'agents/vaultCreate'; name: string }
+  | { type: 'agents/itemPut'; vaultId: string; itemId: string | null; value: AgentItemValue | null }
+  | { type: 'agents/itemEdit'; vaultId: string; itemId: string; title: string; key: string; hosts: string[] }
+  | { type: 'agents/enrollBegin' }
+  | { type: 'agents/enrollReview'; invitationId: string }
+  | { type: 'agents/enrollConfirm'; candidate: MachineCandidate; name: string; days?: number; password: string }
+  | { type: 'agents/tokenCreate'; name: string; days?: number; password: string }
+  | {
+      type: 'agents/grant';
+      machineId: string;
+      vaultId: string;
+      itemId: string;
+      uses: MachineUse[];
+      approval: MachineApproval;
+      session?: number;
+      bounds?: Record<string, unknown>;
+      expiresAt?: number | null;
+    }
+  | { type: 'agents/withdraw'; machineId: string; vaultId: string; itemId: string }
+  | { type: 'agents/approveUse'; machineId: string; requestId: string; mode: 'once' | 'session' }
+  | { type: 'agents/deny'; machineId: string; requestId: string }
+  | { type: 'agents/remove'; machineId: string; password?: string }
+  | { type: 'agents/stopAll'; password: string }
+  | { type: 'agents/resume'; machineId: string; password: string }
+  | { type: 'agents/renew'; machineId: string; days?: number; password: string; token?: string }
+  | { type: 'agents/rekey' }
+  | { type: 'agents/settle' }
+  | { type: 'agents/forget'; machineId: string; password: string; keysReplaced: boolean }
+  | { type: 'agents/audit'; since?: number }
+  | { type: 'agents/move' }
+  | { type: 'agents/sendBack' }
+  | { type: 'agents/reset'; password: string };
+
+export interface AgentVaultItemSummary {
+  id: string;
+  vault: string;
+  version: number;
+  rev: number;
+  kind: string;
+  title: string;
+  service: string;
+  hosts: string[];
+  grants: { machineId: string; machineName: string; approval: MachineApproval }[];
+}
+
+export interface AgentVaultSummary {
+  id: string;
+  name: string;
+  generation: number;
+  items: AgentVaultItemSummary[];
+}
+
+export type PendingAgentRequestView =
+  | {
+      requestId: string;
+      machineId: string;
+      machineName: string;
+      kind: 'use';
+      vault: string;
+      vaultName: string;
+      item: string;
+      itemTitle: string;
+      field: string;
+      use: MachineUse;
+      operation: string;
+      reason: string;
+      canSession: boolean;
+      fresh: boolean;
+      expiresAt: number;
+    }
+  | {
+      requestId: string;
+      machineId: string;
+      machineName: string;
+      kind: 'access';
+      what: string;
+      reason: string;
+      canSession: false;
+      fresh: boolean;
+      expiresAt: number;
+    };
+
+export type AgentsOverview =
+  | { status: 'not-offered' }
+  | { status: 'off' }
+  | { status: 'key-replaced'; moveInProgress: boolean; hasPreviousKey: boolean }
+  | {
+      status: 'open';
+      vaults: AgentVaultSummary[];
+      machines: AgentMachineSummary[];
+      requests: PendingAgentRequestView[];
+      exposed: ExposedKeyEntry[];
+      pendingRekey: number;
+    };
+
+export interface AgentsAuditView {
+  entries: { machineId: string; machineName: string; stream: string; sequence: number; at: number; entry: Record<string, unknown> }[];
+  decisions: { machineId: string; machineName: string; requestId: string; outcome: string; decidedAt: number }[];
+  gaps: number;
+  calls: number;
+  rev: number;
+}
 
 /** A login's 2FA codes: `off` until the link is turned on on the account page, `premium` while the plan does not hold it, `none` with no account. */
 export type CodesView = { status: 'open'; codes: ShownCode[] } | { status: 'off' | 'premium' | 'none' };
@@ -629,7 +758,43 @@ export type ResponseFor<R extends Request> = R extends {
                             ? { outcome: PromptOutcome }
                             : R extends { type: 'pending/view' }
                               ? PendingView | null
-                              : void;
+                              : R extends {
+                                    type:
+                                      | 'agents/view'
+                                      | 'agents/turnOn'
+                                      | 'agents/vaultCreate'
+                                      | 'agents/enrollConfirm'
+                                      | 'agents/grant'
+                                      | 'agents/withdraw'
+                                      | 'agents/approveUse'
+                                      | 'agents/deny'
+                                      | 'agents/remove'
+                                      | 'agents/stopAll'
+                                      | 'agents/resume'
+                                      | 'agents/settle'
+                                      | 'agents/forget'
+                                      | 'agents/move'
+                                      | 'agents/sendBack'
+                                      | 'agents/reset';
+                                  }
+                                ? AgentsOverview
+                                : R extends { type: 'agents/itemPut' | 'agents/itemEdit' }
+                                  ? { itemId: string; overview: AgentsOverview }
+                                  : R extends { type: 'agents/enrollBegin' }
+                                    ? { invitationId: string; text: string }
+                                    : R extends { type: 'agents/enrollReview' }
+                                      ? MachineCandidate | null
+                                      : R extends { type: 'agents/tokenCreate' }
+                                        ? { token: string; machineId: string; overview: AgentsOverview }
+                                        : R extends { type: 'agents/renew' }
+                                          ? { token: string | null; expiresAt: number; overview: AgentsOverview }
+                                          : R extends { type: 'agents/rekey' }
+                                            ? { replaced: number; overview: AgentsOverview }
+                                            : R extends { type: 'agents/audit' }
+                                              ? AgentsAuditView
+                                              : R extends { type: 'agents/pending' }
+                                                ? { count: number }
+                                                : void;
 
 // --- the content script's side ------------------------------------------------
 

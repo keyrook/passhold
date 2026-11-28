@@ -593,6 +593,8 @@ export interface ConsoleSummary {
   billingOffered?: boolean;
   /** Whether this server looks up breaches, so the page shows Breach alerts; a server from before them says nothing, which is no. */
   breachOffered?: boolean;
+  /** Whether this server offers agents, so the page shows Machines; a server from before them says nothing, which is no. */
+  agentsOffered?: boolean;
   /** Who else opened the account's root, newest first, until it is replaced (`RootSeen`). An older server says nothing. */
   rootSeen?: RootSeen[];
 }
@@ -1088,13 +1090,25 @@ export type SyncErrorCode =
    * A 404 for what this server does not offer yet, such as families: nothing
    * to retry until it says otherwise.
    */
-  | 'not_offered';
+  | 'not_offered'
+  /** A machine's credential the person removed: it stays told so while it could have been used. */
+  | 'machine_removed'
+  /** A machine past its expiry: it enrolls again, or a new token is made. */
+  | 'machine_expired'
+  /** A token machine whose token was made again: the new token is the one to use. */
+  | 'machine_replaced'
+  /** A machine three of whose requests in a row were denied: it asks nothing more until the person resumes it, and still uses what it was given. */
+  | 'machine_paused'
+  /** A machine made before the server was restored: it enrolls again. */
+  | 'machine_restored';
 
 export interface SyncErrorBody {
   error: SyncErrorCode;
   message: string;
   /** Seconds to wait, on `rate_limited`. */
   retryAfter?: number;
+  /** When a limit counted by UTC hour, day or month starts again, in milliseconds, on `rate_limited`. */
+  resetAt?: number;
   /** On `device_removed`: the proof the remover sent, as sent, or null when it sent none. Untrusted until checked. */
   proof?: DeviceRemovalProof | null;
 }
@@ -2273,3 +2287,570 @@ export interface LinkBoxesRequest {
   boxes: { product: string; box: OrgBox }[];
 }
 
+/**
+ * An authenticated box from one P-256 key to another, as a machine's boxes,
+ * requests, answers and log entries go: the ephemeral point, then AES-GCM.
+ */
+export interface MachineSealed {
+  epk: string;
+  iv: string;
+  ct: string;
+}
+/** The public halves of an account's agent authority: what a machine pins, and every box to or from a machine is checked against. */
+export interface AgentAuthorityPoints {
+  /** The ECDH point `T`: machines seal to it, and boxes to them come from it. */
+  box: string;
+  /** The ECDSA point that signs every activation, grant, withdrawal and answer. */
+  sign: string;
+}
+/** What one machine may do with one item. Sealed in its box and in its pin, never readable by the server. */
+export type MachineUse = 'request' | 'run' | 'fill' | 'reveal';
+/** When it may: whenever it runs, for a while once the person approves, or each time the person approves. */
+export type MachineApproval = 'standing' | 'session' | 'each';
+/** A grant as the owner's devices make it and the machine opens it. */
+export interface MachineGrant {
+  /** Random, and new with every change: the one grant a request or an answer names, whoever else made one at the same revision. */
+  id: string;
+  /** Its revision: a later grant or withdrawal of the same item has a higher one. */
+  rev: number;
+  uses: MachineUse[];
+  approval: MachineApproval;
+  /** How long an approved session lasts, in seconds; null unless `approval` is `session`. */
+  session: number | null;
+  /** Limits the runtime holds the use to, as the product defines them. */
+  bounds: Record<string, unknown>;
+  /** When the grant ends; null for when the machine does. */
+  expiresAt: number | null;
+}
+/** One item given to one machine: the box from the authority, its grant's revision, and the authority's signature over both and the machine's point. */
+export interface MachineItemBox extends MachineSealed {
+  rev: number;
+  sig: string;
+}
+/** An item taken back from one machine, signed so the machine drops it and refuses older grants of it. */
+export interface MachineWithdrawal {
+  vault: string;
+  item: string;
+  rev: number;
+  sig: string;
+}
+/**
+ * What a person's device answered: readable routing, the authority's
+ * signature, and, when something is released, a box to the request's own
+ * key. The server reads whether it was allowed, and nothing of what.
+ */
+export interface MachineAnswer {
+  outcome: MachineOutcome;
+  /** The request's own key a release is sealed to; null for an ask for access. Public, and made for this request alone. */
+  to: string | null;
+  vault: string | null;
+  item: string | null;
+  version: number | null;
+  grant: number | null;
+  /** The grant's id, beside its revision. */
+  grantId: string | null;
+  /** Until when what is released may be taken; null when nothing is. */
+  deadline: number | null;
+  sig: string;
+  box: MachineSealed | null;
+}
+/** Whether the person allowed the request. What was released, if anything, is sealed. */
+export type MachineOutcome = 'allow' | 'deny';
+/** What a machine may show an agent of an item it was given: never a value, notes or anything else. */
+export interface MachineListing {
+  title?: string;
+  kind?: string;
+  service?: string;
+  environment?: string;
+  /** How the agent names it. */
+  ref?: string;
+}
+/**
+ * How Passhold puts an item's value to use, as the owner set it when the
+ * grant was made: where it may be sent, how a request carries it, and the
+ * variable a command reads it from. None of it is secret; all of it is
+ * signed with the grant, so a change to it is a new grant.
+ */
+export interface MachineDelivery {
+  /** Hosts, lower case, `*.` for a host and those under it, `:port` where one is named. */
+  hosts: string[];
+  /** `bearer`, `basic`, `header:<name>` or `query:<name>`. */
+  sendAs: string;
+  /** The part that goes with the value and is not secret, as Basic authentication needs; null for none. */
+  keyId: string | null;
+  /** The variable a command reads it from; null for none. */
+  env: string | null;
+}
+/** A record of an agent vault, or its deletion, signed by the vault's write key. */
+export interface AgentSignedBox {
+  iv: string;
+  ct: string;
+  sig: string;
+}
+/** What a person's Passhold reads of its agents: the authority and directory, sealed, every machine's pin, and enrollments waiting. */
+export interface AgentsState {
+  authority: AgentAuthorityState | null;
+  machines: MachineView[];
+  enrollments: MachineEnrollmentView[];
+  /** What this plan allows. */
+  allowance: { machines: number; vaults: number };
+  /** Once Passhold's key was replaced, the move of the agents to the new key while it is under way. */
+  move?: AgentMoveState | null;
+  /** The server's sync epoch, which a database put back from a backup changes. */
+  epoch?: string;
+}
+/** One vault's next generation in a move: its key and write key under Passhold's new key, its name under its new key. */
+export interface AgentMoveVault {
+  id: string;
+  generation: number;
+  keyWrap: SealedBox;
+  nameBox: SealedBox;
+  writePoint: string;
+}
+/** A move of the agents to Passhold's new key, under way: the new authority, sealed under the new key, every vault's next generation, and the pins set beside their machines so far. */
+export interface AgentMoveState {
+  points: AgentAuthorityPoints;
+  wrap: SealedBox;
+  keyGeneration: number;
+  vaults: AgentMoveVault[];
+  pins: { machine: string; pin: SealedBox }[];
+}
+/** Proof a device holds both of Passhold's keys: the one the agents move to (or are moving to), and the one they are under. */
+export interface AgentMoveProof {
+  keyCheck: string;
+  previousKeyCheck: string;
+}
+/**
+ * `POST /agents/move`: the agents start to move to Passhold's new key, from
+ * the directory version the device read, with proof it holds both keys.
+ */
+export interface BeginAgentMoveRequest extends AgentMoveProof {
+  points: AgentAuthorityPoints;
+  wrap: SealedBox;
+  keyGeneration: number;
+  from: number;
+  vaults: AgentMoveVault[];
+}
+/**
+ * `POST /agents/move/step`: for the move whose new authority is `points`,
+ * pins sealed again under the new key, records at a later version under
+ * their vault's next generation, and devices' records of decisions sealed
+ * again under the new key, or let go (`null`) when they do not open under
+ * the key they were kept under. Each is set once beside what it replaces.
+ */
+export interface AgentMoveStepRequest extends AgentMoveProof {
+  points: AgentAuthorityPoints;
+  pins?: { machine: string; pin: SealedBox }[];
+  records?: AgentRekeyRecord[];
+  decisions?: { machineId: string; requestId: string; box: SealedBox | null }[];
+}
+/** `GET /agents/move/decisions?machine=&request=`: the devices' records of decisions not yet sealed again, a page at a time. */
+export interface AgentMoveDecisionsPage {
+  decisions: MachineDecisionView[];
+  next: { machine: string; request: string } | null;
+}
+/** `POST /agents/move/finish`: the directory under the new key, which puts everything the move set beside what it replaces in its place at once. */
+export interface FinishAgentMoveRequest extends AgentMoveProof {
+  points: AgentAuthorityPoints;
+  directory: NextDirectory;
+}
+/** `POST /agents/reset`: agents stopped under a Passhold key replaced let go of, with fresh proof the person is there and proof of Passhold's key as it is. */
+export interface ResetAgentsRequest extends OwnerProofFields {
+  keyCheck: string;
+  keyGeneration: number;
+}
+/** A machine a server lost, as the device that sends its pin back last read it. */
+export interface SentBackMachine {
+  kind: 'enrolled' | 'token';
+  publicKey: string;
+  createdAt: number;
+  expiresAt: number;
+  invitationId: string;
+}
+/**
+ * `POST /agents/send-back`: from a device that trusted more than a server
+ * put back from a backup holds, the next directory and the pins of ended
+ * machines it names that the server holds older, or not at all.
+ */
+export interface SendAgentsBackRequest {
+  directory: NextDirectory;
+  pins: { id: string; pin: SealedBox; machine?: SentBackMachine }[];
+}
+export interface AgentAuthorityState {
+  points: AgentAuthorityPoints;
+  /** Sealed under Passhold's key. */
+  wrap: SealedBox;
+  keyGeneration: number;
+  directory: { version: number; box: SealedBox };
+  /** The directories after the version asked for, up to this one, so each step can be checked. */
+  history: { version: number; box: SealedBox }[];
+}
+/** One machine as the server keeps it: routing in the clear, everything else in its sealed pin. */
+export interface MachineView {
+  id: string;
+  kind: 'enrolled' | 'token';
+  publicKey: string;
+  pin: SealedBox;
+  status: 'live' | 'paused' | 'removed';
+  createdAt: number;
+  expiresAt: number;
+  removedAt: number | null;
+  /** The invitation an enrolled machine answered, or a token machine's own id: what its activation names. */
+  invitationId: string;
+}
+export interface MachineEnrollmentView {
+  id: string;
+  createdAt: number;
+  expiresAt: number;
+  /** What the machine answered with, once it has. */
+  machineId: string | null;
+  publicKey: string | null;
+  answeredAt: number | null;
+  confirmedAt: number | null;
+}
+/** `POST /agents/authority`: the first Passhold device to turn agents on, with proof it holds Passhold's key. */
+export interface CreateAgentAuthorityRequest {
+  points: AgentAuthorityPoints;
+  wrap: SealedBox;
+  keyGeneration: number;
+  keyCheck: string;
+  directory: SealedBox;
+}
+/** `POST /agents/enrollments`: an invitation, its id and secret made on the person's device. */
+export interface CreateMachineEnrollmentRequest {
+  id: string;
+  secret: string;
+}
+/** `POST /machine/enroll`, with the invitation's secret: the machine's own id, its point and its own credential. */
+export interface MachineEnrollRequest {
+  machineId: string;
+  publicKey: string;
+  credential: string;
+}
+/** `GET /machine/enrollment`, with the machine's own credential: the activation once the person confirmed. */
+export interface MachineEnrollmentStatus {
+  confirmed: boolean;
+  activation: { sig: string; expiresAt: number } | null;
+}
+/**
+ * What the person's device writes when it adds a machine: its pin, the next
+ * directory that names it, and fresh proof that the person is there.
+ */
+export interface MachineAddition extends OwnerProofFields {
+  machineId: string;
+  publicKey: string;
+  pin: SealedBox;
+  expiresAt: number;
+  directory: NextDirectory;
+  /**
+   * The authority's activation of this point and expiry: for an enrolled
+   * machine, for the invitation it answered; for a token machine, under its
+   * own id. Only a device that holds the authority makes one.
+   */
+  activation: string;
+}
+/** `POST /agents/enrollments/:id/confirm`: an enrolled machine, confirmed. */
+export type ConfirmMachineEnrollmentRequest = MachineAddition;
+/** `POST /agents/machines`: a token machine, its credential made on the person's device. */
+export interface CreateTokenMachineRequest extends MachineAddition {
+  credential: string;
+}
+/** An agent vault as the server keeps it: its key's wrap and name, sealed, and its write key's point. */
+export interface AgentVaultView {
+  id: string;
+  generation: number;
+  /** The vault's key and write key, under Passhold's key. */
+  keyWrap: SealedBox;
+  /** Its name, under its own key. */
+  nameBox: SealedBox;
+  writePoint: string;
+  serverRev: number;
+  createdAt: number;
+}
+/** `GET /agents/vaults`: every vault, and how many live records they hold together against the ceiling. */
+export interface AgentVaultsResponse {
+  vaults: AgentVaultView[];
+  records: number;
+  ceiling: number;
+}
+/** The next directory a change names, after the version the device read. */
+export interface NextDirectory {
+  version: number;
+  box: SealedBox;
+  /**
+   * The digest of the directory it follows, as this device trusted it: one
+   * made for another directory of the same version, as after agents start
+   * afresh or a database is put back, is refused.
+   */
+  prev: string;
+}
+/** `POST /agents/vaults`: a new vault, and the next directory naming it. */
+export interface CreateAgentVaultRequest {
+  id: string;
+  keyWrap: SealedBox;
+  nameBox: SealedBox;
+  writePoint: string;
+  directory: NextDirectory;
+}
+/** One record of an agent vault as it goes over the wire, with its item version's key, wrapped under the vault's. */
+export interface AgentRecordWire {
+  item: string;
+  version: number;
+  rev: number;
+  keyGeneration: number;
+  itemKeyWrap: SealedBox;
+  deleted: boolean;
+  box: AgentSignedBox;
+  /** While the agents move to Passhold's new key, the record the move set beside this one, under the vault's next generation. */
+  moved?: AgentMovedRecord | null;
+}
+export interface AgentMovedRecord {
+  version: number;
+  rev: number;
+  itemKeyWrap: SealedBox;
+  box: AgentSignedBox;
+}
+/** `GET /agents/vaults/:id/sync?since=`: what changed since, a page at a time. */
+export interface AgentVaultPull {
+  records: AgentRecordWire[];
+  serverRev: number;
+  hasMore: boolean;
+  epoch: string;
+}
+/**
+ * `POST /agents/vaults/:id/sync`: records written on this device, each at
+ * the revision after the one the server holds (a new item at 1), from the
+ * directory version the device read. All are taken, or none.
+ */
+export interface AgentVaultPush {
+  records: AgentRecordWire[];
+  directory: number;
+}
+export interface AgentVaultPushed {
+  serverRev: number;
+}
+/** One item's grant or withdrawal for one machine, where it goes. */
+export interface MachineGrantChange {
+  vault: string;
+  item: string;
+  version: number;
+  /** The grant, sealed and signed; null for a withdrawal. */
+  box: MachineItemBox | null;
+  withdrawal: MachineWithdrawal | null;
+  /** For a grant, its id, as an answer names it; null for a withdrawal. */
+  grantId: string | null;
+  /** For a grant, the revision of the record it was made from, so one made from an older one is refused; null for a withdrawal. */
+  recordRev: number | null;
+}
+/** `PUT /agents/machines/:id/grants`: grants and withdrawals, the machine's pin as it now is, and the next directory. */
+export interface MachineGrantsRequest {
+  changes: MachineGrantChange[];
+  pin: SealedBox;
+  directory: NextDirectory;
+}
+/** A record sealed again under a new item key, at a version past `from`, the one read. */
+export interface AgentRekeyRecord extends AgentRecordWire {
+  vault: string;
+  from: number;
+}
+/**
+ * `POST /agents/rekey`: items given new keys, each machine still holding one
+ * given the new key's grant with its pin as it now is, and the next directory.
+ * All are taken, or none.
+ */
+export interface AgentRekeyRequest {
+  records: AgentRekeyRecord[];
+  machines: { id: string; changes: MachineGrantChange[]; pin: SealedBox }[];
+  directory: NextDirectory;
+}
+/** One change a machine pulls: a grant with the item's current record, or a withdrawal. */
+export interface MachinePulledItem {
+  vault: string;
+  item: string;
+  version: number;
+  grant: number;
+  box: MachineItemBox | null;
+  withdrawal: MachineWithdrawal | null;
+  /** The item's record at the version the box is for; null when there is none at that version. */
+  record: { rev: number; deleted: boolean; box: AgentSignedBox } | null;
+}
+/**
+ * `GET /machine/pull?since=&vault=&item=`: this machine's changes after its
+ * cursor, and nothing of anyone else's. With `hasMore`, the next page follows
+ * `rev` and `after`, the last item of this page in that revision; without,
+ * `rev` is the machine's revision now and `after` is null.
+ */
+export interface MachinePull {
+  rev: number;
+  after: { vault: string; item: string } | null;
+  epoch: string;
+  changes: MachinePulledItem[];
+  hasMore: boolean;
+}
+/** `POST /machine/requests`: a request sealed from the machine to the authority, under an id the machine made. The same again is answered as it was. */
+export interface MachineRequestSubmission {
+  id: string;
+  box: MachineSealed;
+}
+/** `GET /machine/requests/:id`: a request as its machine reads it back, waiting or answered, until it may no longer be. */
+export interface MachineRequestState {
+  id: string;
+  status: 'pending' | 'answered';
+  /** Until when the person may answer it, or, once answered, until when the answer may be taken. */
+  expiresAt: number;
+  answer: MachineAnswer | null;
+}
+/** One request waiting for the person, as Passhold reads it to open and show. */
+export interface MachineRequestView {
+  machineId: string;
+  id: string;
+  box: MachineSealed;
+  createdAt: number;
+  expiresAt: number;
+}
+/** `GET /agents/requests?machine=&after=`: requests waiting, a page at a time, after the machine and request the last page ended on. */
+export interface MachineRequestsPage {
+  requests: MachineRequestView[];
+  next: { machine: string; request: string } | null;
+}
+/** `POST /agents/requests/:id/decision`: what the device answered, and its own record of it under Passhold's key. */
+export interface MachineDecisionSubmission {
+  machineId: string;
+  answer: MachineAnswer;
+  record: SealedBox;
+}
+/** What a decision left the machine: still live, or paused by a run of denials. */
+export interface MachineDecided {
+  status: 'live' | 'paused';
+}
+/** One entry of a machine's log, at its place in the run that wrote it. */
+export interface MachineLogWire {
+  stream: string;
+  sequence: number;
+  box: MachineSealed;
+}
+/** `POST /machine/log`: a batch of entries, at most one batch a minute. */
+export interface MachineLogBatch {
+  entries: MachineLogWire[];
+}
+/** Sequences of one run, from `first` to `last`. */
+export interface MachineLogRange {
+  stream: string;
+  first: number;
+  last: number;
+}
+/**
+ * What the server did with a batch: the entries it keeps, those it refused
+ * for want of room this month, which the machine keeps, and those whose place
+ * already holds another entry. An identical retry is acknowledged as before.
+ */
+export interface MachineLogAck {
+  accepted: MachineLogRange[];
+  refused: MachineLogRange[];
+  conflicts: MachineLogRange[];
+}
+/** One log entry as a person's Passhold reads it. */
+export interface MachineLogView extends MachineLogWire {
+  machineId: string;
+  receivedAt: number;
+  rev: number;
+}
+/** A deciding device's record of what it decided, under Passhold's key. */
+export interface MachineDecisionView {
+  machineId: string;
+  requestId: string;
+  deviceId: string;
+  outcome: MachineOutcome;
+  box: SealedBox;
+  decidedAt: number;
+  rev: number;
+}
+/** Entries the server refused for want of room, counted and never kept. */
+export interface MachineRefusedView extends MachineLogRange {
+  machineId: string;
+  refusedAt: number;
+  rev: number;
+}
+/** `GET /agents/log?since=`: log entries, decisions and refusals after the account's audit revision, in order. */
+export interface AgentLogPage {
+  entries: MachineLogView[];
+  decisions: MachineDecisionView[];
+  refused: MachineRefusedView[];
+  rev: number;
+  hasMore: boolean;
+}
+/** The server's own account of one machine's calls in one UTC hour: its word, not the machine's. */
+export interface MachineHourView {
+  machineId: string;
+  /** The hour's start, in milliseconds. */
+  hour: number;
+  calls: number;
+  pulls: number;
+  /** Pulls that found nothing new. */
+  unchanged: number;
+  /** Requests for approval sent. */
+  asks: number;
+  /** Reads of a request's answer. */
+  reads: number;
+  logs: number;
+  /** Calls refused for a limit. */
+  refused: number;
+  addresses: string[];
+  countries: string[];
+  clients: string[];
+  /** The items it was handed, `vault:item`. */
+  fetched: string[];
+}
+/** `GET /agents/audit?from=&machine=&hour=`: hours from `from`, a page at a time, after the hour and machine the last page ended on. */
+export interface AgentAuditPage {
+  hours: MachineHourView[];
+  next: { hour: number; machine: string } | null;
+}
+/**
+ * `DELETE /agents/machines/:id` and `DELETE /agents/machines`: the next
+ * directory, which names the machines removed and the item versions they
+ * could have opened, with fresh proof unless every machine named has expired
+ * or was already ended by the server.
+ */
+export interface RemoveMachinesRequest extends OwnerProofFields {
+  directory: NextDirectory;
+}
+/** What the server ended: these machines can no longer connect. Replacing the keys they could hold is the device's. */
+export interface MachinesRemoved {
+  removed: string[];
+}
+/**
+ * `POST /agents/machines/:id/renew`: a live machine's new expiry, its pin and
+ * the next directory, the authority's activation of its point at that
+ * expiry, and for a token machine the credential its new token carries.
+ */
+export interface RenewMachineRequest extends OwnerProofFields {
+  expiresAt: number;
+  pin: SealedBox;
+  directory: NextDirectory;
+  activation: string;
+  credential?: string;
+}
+/** `POST /agents/forget`: removed machines the directory names no more, once nothing kept of them needs their pin, with fresh proof. */
+export interface ForgetMachinesRequest extends OwnerProofFields {
+  machines: string[];
+  directory: NextDirectory;
+}
+/** `GET /machine/status`: a live machine as the server holds it, with the authority's activation of its expiry. */
+export interface MachineStatusView {
+  machineId: string;
+  kind: 'enrolled' | 'token';
+  status: 'live' | 'paused';
+  expiresAt: number;
+  activation: { sig: string; expiresAt: number };
+}
+/**
+ * `GET /account/archives/:id/agent-vaults`: what an account's agents held
+ * when it started over, sealed as it was under Passhold's old key; null
+ * when there were none. No machine of it can use anything here.
+ */
+export interface ArchivedAgentsResponse {
+  authority: Omit<AgentAuthorityState, 'history'> | null;
+  machines: Omit<MachineView, 'invitationId'>[];
+  vaults: AgentVaultView[];
+}

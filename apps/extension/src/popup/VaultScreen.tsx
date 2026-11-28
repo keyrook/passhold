@@ -100,13 +100,16 @@ function PlaceScreen({
   const [chosenFolder, setFolder] = useState<string | null>(null);
   const [page, setPage] = useState<PageInfo | null>(null);
   const [pending, setPending] = useState<PendingView | null>(null);
+  const [agentPending, setAgentPending] = useState(0);
   const { copied, copy } = useCopy();
   const { error, run } = useAction();
 
   useEffect(() => {
     void send({ type: 'page/info' }).then(setPage).catch(() => setPage({ site: null, url: null, loginIds: [] }));
     void send({ type: 'pending/view' }).then(setPending).catch(() => setPending(null));
-  }, [data]);
+    if (linked) void send({ type: 'agents/pending' }).then((res) => setAgentPending(res.count), () => setAgentPending(0));
+    else setAgentPending(0);
+  }, [data, linked]);
 
   const all = useMemo(() => sorted(data.items, t.locale), [data.items, t.locale]);
   const live = all.length + data.wallet.filter((item) => item.deletedAt === null).length;
@@ -287,6 +290,23 @@ function PlaceScreen({
         {account?.removed && !query && (
           <div className="mx-2 mb-2">
             <RemovedNotice removedAt={account.removed} />
+          </div>
+        )}
+
+        {agentPending > 0 && !query && (
+          <div className="mx-2 mb-2" data-testid="popup-agents-pending">
+            <Callout tone="info">
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-medium">{t('agents.pendingBanner', { count: agentPending })}</span>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => void chrome.tabs.create({ url: chrome.runtime.getURL('options.html#agents') })}
+                >
+                  {t('agents.reviewButton')}
+                </Button>
+              </span>
+            </Callout>
           </div>
         )}
 

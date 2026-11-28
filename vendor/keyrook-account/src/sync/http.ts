@@ -159,6 +159,38 @@ import type {
   EmergencyPullResponse,
   EmergencyState,
   OrgBox,
+  AgentsState,
+  ConfirmMachineEnrollmentRequest,
+  CreateAgentAuthorityRequest,
+  CreateMachineEnrollmentRequest,
+  CreateTokenMachineRequest,
+  MachineEnrollmentView,
+  MachineView,
+  AgentRecordWire,
+  AgentRekeyRequest,
+  AgentVaultPull,
+  AgentVaultPush,
+  AgentVaultPushed,
+  AgentVaultsResponse,
+  AgentVaultView,
+  CreateAgentVaultRequest,
+  MachineGrantsRequest,
+  AgentAuditPage,
+  ArchivedAgentsResponse,
+  ForgetMachinesRequest,
+  MachinesRemoved,
+  RemoveMachinesRequest,
+  RenewMachineRequest,
+  AgentLogPage,
+  MachineDecided,
+  MachineDecisionSubmission,
+  MachineRequestsPage,
+  AgentMoveDecisionsPage,
+  AgentMoveStepRequest,
+  BeginAgentMoveRequest,
+  FinishAgentMoveRequest,
+  ResetAgentsRequest,
+  SendAgentsBackRequest,
 } from './protocol.js';
 
 const collectionPath = (orgId: string, collectionId: string) => `/orgs/${encodeURIComponent(orgId)}/collections/${encodeURIComponent(collectionId)}`;
@@ -174,6 +206,22 @@ export function namedClient(fetcher: Fetcher, client: string): Fetcher {
   return (input, init) => {
     const headers = new Headers(init?.headers);
     headers.set('x-keyrook-client', client);
+    return fetcher(input, { ...init, headers });
+  };
+}
+
+/**
+ * A fetcher for a phone app's native code that names the app by its id
+ * (`com.keyrook.passhold`) in every request. Native code sends no `Origin`,
+ * so this is how the server knows which app's signing certificate a passkey
+ * answered for (`android:apk-key-hash:…`); the server, not the app, holds
+ * that certificate. Never for a web page or an extension: the server refuses
+ * a passkey to a request that carries both an origin and an app.
+ */
+export function namedApp(fetcher: Fetcher, appId: string): Fetcher {
+  return (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set('x-keyrook-app', appId);
     return fetcher(input, { ...init, headers });
   };
 }
@@ -197,7 +245,8 @@ export class SyncHttpError extends Error {
   }
 }
 
-async function request<T>(
+/** One JSON call to the server, with no session of a person's: what a machine's own client is built on. */
+export async function request<T>(
   baseUrl: string,
   path: string,
   init: RequestInit,
@@ -1111,6 +1160,123 @@ export class HttpSyncAdapter implements SyncAdapter {
     return this.authed<BreachWatchState>('/breach/account', { method: 'PUT', body: JSON.stringify({ watch } satisfies BreachWatchRequest) });
   }
 
+  /** Passhold's agents: the authority and directory, sealed, every machine's pin, and invitations waiting. */
+  async agents(since = 0): Promise<AgentsState> {
+    return this.authed<AgentsState>(`/agents?since=${since}`, { method: 'GET' });
+  }
+  async createAgentAuthority(body: CreateAgentAuthorityRequest): Promise<void> {
+    await this.authed<unknown>('/agents/authority', { method: 'POST', body: JSON.stringify(body) });
+  }
+  async createMachineEnrollment(body: CreateMachineEnrollmentRequest): Promise<MachineEnrollmentView> {
+    return this.authed<MachineEnrollmentView>('/agents/enrollments', { method: 'POST', body: JSON.stringify(body) });
+  }
+  async machineEnrollment(id: string): Promise<MachineEnrollmentView> {
+    return this.authed<MachineEnrollmentView>(`/agents/enrollments/${encodeURIComponent(id)}`, { method: 'GET' });
+  }
+  async confirmMachineEnrollment(id: string, body: ConfirmMachineEnrollmentRequest): Promise<MachineView> {
+    return this.authed<MachineView>(`/agents/enrollments/${encodeURIComponent(id)}/confirm`, { method: 'POST', body: JSON.stringify(body) });
+  }
+  async createTokenMachine(body: CreateTokenMachineRequest): Promise<MachineView> {
+    return this.authed<MachineView>('/agents/machines', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** Every agent vault, sealed, and how many live records they hold together. */
+  async agentVaults(): Promise<AgentVaultsResponse> {
+    return this.authed<AgentVaultsResponse>('/agents/vaults', { method: 'GET' });
+  }
+  async createAgentVault(body: CreateAgentVaultRequest): Promise<AgentVaultView> {
+    return this.authed<AgentVaultView>('/agents/vaults', { method: 'POST', body: JSON.stringify(body) });
+  }
+  async agentVaultPull(vaultId: string, since: number): Promise<AgentVaultPull> {
+    return this.authed<AgentVaultPull>(`/agents/vaults/${encodeURIComponent(vaultId)}/sync?since=${since}`, { method: 'GET' });
+  }
+  /** Records written on this device: all are taken, or none. */
+  async agentVaultPush(vaultId: string, records: AgentRecordWire[], directory: number): Promise<AgentVaultPushed> {
+    return this.authed<AgentVaultPushed>(`/agents/vaults/${encodeURIComponent(vaultId)}/sync`, { method: 'POST', body: JSON.stringify({ records, directory } satisfies AgentVaultPush) });
+  }
+  /** Grants and withdrawals for one machine, with its pin and the next directory. */
+  async putMachineGrants(machineId: string, body: MachineGrantsRequest): Promise<void> {
+    await this.authed<unknown>(`/agents/machines/${encodeURIComponent(machineId)}/grants`, { method: 'PUT', body: JSON.stringify(body) });
+  }
+  /** Items given new keys, the grants of the machines still holding them, and the next directory, in one step. */
+  async rekeyAgentItems(body: AgentRekeyRequest): Promise<void> {
+    await this.authed<unknown>('/agents/rekey', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** Requests waiting for the person, a page at a time. */
+  async machineRequests(after: { machine: string; request: string } | null = null): Promise<MachineRequestsPage> {
+    const page = after ? `?machine=${encodeURIComponent(after.machine)}&after=${encodeURIComponent(after.request)}` : '';
+    return this.authed<MachineRequestsPage>(`/agents/requests${page}`, { method: 'GET' });
+  }
+  /** This device's answer to one request, and its own record of it. */
+  async decideMachineRequest(requestId: string, body: MachineDecisionSubmission): Promise<MachineDecided> {
+    return this.authed<MachineDecided>(`/agents/requests/${encodeURIComponent(requestId)}/decision`, { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** A paused machine asks again, with fresh proof that the person is there. */
+  async resumeMachine(machineId: string, proof: OwnerProofFields): Promise<void> {
+    await this.authed<unknown>(`/agents/machines/${encodeURIComponent(machineId)}/resume`, { method: 'POST', body: JSON.stringify(proof) });
+  }
+  /** The machines' log, the decisions and the refusals after the audit revision this device read. */
+  async agentLog(since: number): Promise<AgentLogPage> {
+    return this.authed<AgentLogPage>(`/agents/log?since=${since}`, { method: 'GET' });
+  }
+  /** The server's account of each machine's calls by the hour, from `from`. */
+  /** Removes one machine with the directory that names it removed; fresh proof unless it has expired or was ended already. */
+  async removeMachine(machineId: string, body: RemoveMachinesRequest): Promise<MachinesRemoved> {
+    return this.authed<MachinesRemoved>(`/agents/machines/${encodeURIComponent(machineId)}`, { method: 'DELETE', body: JSON.stringify(body) });
+  }
+  /** Stops every agent: every machine removed, and every invitation with them. */
+  async stopAllMachines(body: RemoveMachinesRequest): Promise<MachinesRemoved> {
+    return this.authed<MachinesRemoved>('/agents/machines', { method: 'DELETE', body: JSON.stringify(body) });
+  }
+  async renewMachine(machineId: string, body: RenewMachineRequest): Promise<MachineView> {
+    return this.authed<MachineView>(`/agents/machines/${encodeURIComponent(machineId)}/renew`, { method: 'POST', body: JSON.stringify(body) });
+  }
+  async forgetMachines(body: ForgetMachinesRequest): Promise<void> {
+    await this.authed<unknown>('/agents/forget', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** The agents start to move to Passhold's new key: the new authority and every vault's next generation, beside what is there. */
+  async beginAgentMove(body: BeginAgentMoveRequest): Promise<void> {
+    await this.authed<unknown>('/agents/move', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** The devices' records of decisions a move has not sealed again yet, a page at a time. */
+  async agentMoveDecisions(after: { machine: string; request: string } | null = null): Promise<AgentMoveDecisionsPage> {
+    const page = after ? `?machine=${encodeURIComponent(after.machine)}&request=${encodeURIComponent(after.request)}` : '';
+    return this.authed<AgentMoveDecisionsPage>(`/agents/move/decisions${page}`, { method: 'GET' });
+  }
+  /** Pins, records and decisions under the new key, set beside what they replace. */
+  async agentMoveStep(body: AgentMoveStepRequest): Promise<void> {
+    await this.authed<unknown>('/agents/move/step', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** The directory under the new key, which puts everything moved in its place at once. */
+  async finishAgentMove(body: FinishAgentMoveRequest): Promise<void> {
+    await this.authed<unknown>('/agents/move/finish', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** Lets go of agents stopped under a Passhold key replaced, with fresh proof, so they are turned on afresh. */
+  async resetAgents(body: ResetAgentsRequest): Promise<void> {
+    await this.authed<unknown>('/agents/reset', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** What this device trusted of the agents, to a server that no longer holds it. */
+  async sendAgentsBack(body: SendAgentsBackRequest): Promise<void> {
+    await this.authed<unknown>('/agents/send-back', { method: 'POST', body: JSON.stringify(body) });
+  }
+  /** What a start over put aside of the agents, sealed under Passhold's old key. */
+  async archivedAgents(archiveId: string): Promise<ArchivedAgentsResponse> {
+    return this.authed<ArchivedAgentsResponse>(`/account/archives/${encodeURIComponent(archiveId)}/agent-vaults`, { method: 'GET' });
+  }
+  async archivedAgentVaultPull(archiveId: string, vaultId: string, since: number): Promise<AgentVaultPull> {
+    return this.authed<AgentVaultPull>(`/account/archives/${encodeURIComponent(archiveId)}/agent-vaults/${encodeURIComponent(vaultId)}/sync?since=${since}`, { method: 'GET' });
+  }
+  async archivedAgentAudit(archiveId: string, from: number, after: { hour: number; machine: string } | null = null): Promise<AgentAuditPage> {
+    const page = after ? `&hour=${after.hour}&machine=${encodeURIComponent(after.machine)}` : '';
+    return this.authed<AgentAuditPage>(`/account/archives/${encodeURIComponent(archiveId)}/agent-audit?from=${from}${page}`, { method: 'GET' });
+  }
+  async archivedAgentLog(archiveId: string, since: number): Promise<AgentLogPage> {
+    return this.authed<AgentLogPage>(`/account/archives/${encodeURIComponent(archiveId)}/agent-log?since=${since}`, { method: 'GET' });
+  }
+
+  async agentAudit(from: number, after: { hour: number; machine: string } | null = null): Promise<AgentAuditPage> {
+    const page = after ? `&hour=${after.hour}&machine=${encodeURIComponent(after.machine)}` : '';
+    return this.authed<AgentAuditPage>(`/agents/audit?from=${from}${page}`, { method: 'GET' });
+  }
   /** A link between two of the account's products, as this session sees it. */
   async link(link: string): Promise<LinkState> {
     return this.authed<LinkState>(`/links/${encodeURIComponent(link)}`, { method: 'GET' });

@@ -12,7 +12,9 @@
 import { DecryptionError, unwrapDataKey, wrapDataKey, type SealedBox } from '../crypto/aead.js';
 import { openProductBox, sealProductBox } from '../keys/box.js';
 import { sealRootPin } from '../keys/pin.js';
-import { AUTHENTICATOR, deriveProductKeyCheck } from '../keys/product.js';
+import { AUTHENTICATOR, deriveProductKeyCheck, PASSHOLD } from '../keys/product.js';
+import { keysWaitingFor, openAgents, removeMachine, stopAllMachines, type TrustedAgents } from './machine.js';
+import type { ProductKey } from './product-key.js';
 import { makeDeviceRemovalProof } from '../keys/removal.js';
 import {
   deriveRootCheck,
@@ -902,6 +904,100 @@ export async function consoleRemoveDevice(
     await makeDeviceRemovalProof(key, { accountId: held.accountId, product: device.product, deviceId: device.deviceId! }),
   );
   return { proved: true };
+}
+
+// --- Machines ---------------------------------------------------------------
+
+/** One machine as the page shows it: what the directory and its pin say, never the server alone. */
+export interface ConsoleMachine {
+  id: string;
+  name: string;
+  kind: 'enrolled' | 'token';
+  /** `ended` is a live machine past its expiry; `removed` one the person removed or stopped. */
+  status: 'live' | 'paused' | 'ended' | 'removed';
+  createdAt: number;
+  expiresAt: number;
+  /** Item keys it could hold that still wait for new ones from a Passhold device; zero while it is live. */
+  keysWaiting: number;
+}
+
+/**
+ * Passhold's key, opened from the root, and the agents checked under it.
+ * The page keeps no checkpoint: each operation opens the directory afresh,
+ * and a directory the server could only replay, not forge, is caught by the
+ * server's own compare on the next removal.
+ */
+async function openPassholdAgents(api: HttpSyncAdapter, server: AccountServer, proof: ConsoleProof | RemovalProof) {
+  const held = withRoot(await api.consoleKeys());
+  const { root, keys } = await opened(() => openRoot(server, held, proof), proof as RemovalProof);
+  const entry = held.products.find((box) => box.product === PASSHOLD && box.rootGeneration === held.root.generation);
+  // An account that never used Passhold has no agents to show.
+  if (!entry) return null;
+  let key: CryptoKey;
+  try {
+    key = await openProductBox(entry.box, root, held.accountId, PASSHOLD);
+  } catch {
+    throw new Error('The key of Passhold does not open with this account’s root. Nothing was changed.');
+  }
+  const passhold: ProductKey = {
+    accountId: held.accountId,
+    product: PASSHOLD,
+    key,
+    keyGeneration: entry.keyGeneration,
+    root: root.publicKey,
+    rootGeneration: held.root.generation,
+    sheetVerifiedAt: null,
+  };
+  const trusted = await openAgents(api, passhold, null);
+  return { passhold, trusted, keys };
+}
+
+function machinesOf(trusted: TrustedAgents, now = Date.now()): ConsoleMachine[] {
+  return trusted.directory.machines.map((entry) => {
+    const pin = trusted.pins.get(entry.id)!;
+    const view = trusted.machines.get(entry.id)!;
+    const status = view.status === 'removed' ? 'removed' : pin.expiresAt <= now ? 'ended' : view.status;
+    return { id: entry.id, name: pin.name, kind: pin.kind, status, createdAt: pin.createdAt, expiresAt: pin.expiresAt, keysWaiting: keysWaitingFor(trusted, entry.id, now) };
+  });
+}
+
+/**
+ * Every machine of the account, with its name, opened here with what the
+ * person typed or touched, and dropped when this returns. Empty when agents
+ * were never turned on. A name whose pin does not match the directory is
+ * refused, never shown as some machine's.
+ */
+export async function consoleListMachines(api: HttpSyncAdapter, server: AccountServer, input: { proof: RemovalProof }): Promise<ConsoleMachine[]> {
+  try {
+    const opened = await openPassholdAgents(api, server, input.proof);
+    return opened ? machinesOf(opened.trusted) : [];
+  } catch (error) {
+    if (error instanceof DecryptionError && /not turned on/.test(error.message)) return [];
+    if (error instanceof DecryptionError) throw new Error('The list of machines does not check out. Nothing is shown.');
+    throw error;
+  }
+}
+
+/**
+ * Removes one machine, with fresh proof the person is here: it stops at
+ * once, and the keys it could hold wait for a Passhold device to replace
+ * them. Answers the list as it is now.
+ */
+export async function consoleRemoveMachine(api: HttpSyncAdapter, server: AccountServer, input: { machineId: string; proof: ConsoleProof }): Promise<ConsoleMachine[]> {
+  const opened = await openPassholdAgents(api, server, input.proof);
+  if (!opened) throw new Error('There is no such machine.');
+  const { passhold, trusted, keys } = opened;
+  const ended = await removeMachine(api, trusted, passhold, input.machineId, await ownerProof(input.proof, keys));
+  return machinesOf(await openAgents(api, passhold, ended.checkpoint));
+}
+
+/** Stops every machine and every invitation still waiting, with fresh proof. Answers the list as it is now. */
+export async function consoleStopAllMachines(api: HttpSyncAdapter, server: AccountServer, input: { proof: ConsoleProof }): Promise<ConsoleMachine[]> {
+  const opened = await openPassholdAgents(api, server, input.proof);
+  if (!opened) throw new Error('There is no such machine.');
+  const { passhold, trusted, keys } = opened;
+  const ended = await stopAllMachines(api, trusted, passhold, await ownerProof(input.proof, keys));
+  return machinesOf(await openAgents(api, passhold, ended.checkpoint));
 }
 
 /** What a key that will not open with what was typed says, in the person's words. */

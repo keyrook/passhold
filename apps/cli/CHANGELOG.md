@@ -1,5 +1,20 @@
 # Passhold CLI: changes
 
+## 0.3.0
+
+- Machines and agents: a separate, sealed vault for automation and coding tools
+  that stays apart from your personal vault. Enrol a machine with an invite
+  code (`passhold machine invite`, `passhold machine enroll`, `passhold machine
+  confirm`), grant individual API keys with per-use, session or standing
+  approval (`passhold machine grant`, `passhold machine withdraw`), and manage
+  machine keys, emergency stop, removal and audit logs (`passhold machine
+  stop-all`, `remove`, `rekey`, `forget`, `audit`).
+- Interactive approval at the terminal (`passhold approve`), requiring a fresh
+  unlock separate from `PASSHOLD_SESSION`.
+- Local MCP server over stdio (`passhold mcp`) exposing only the enrolled
+  machine's permitted tools, with per-use requests waiting for owner approval
+  in Passhold (browser extension, Android app or `passhold approve`).
+
 ## 0.2.0
 
 - A program for each system, with nothing else to install: macOS (Apple

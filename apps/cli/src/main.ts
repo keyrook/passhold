@@ -180,6 +180,7 @@ const context: Context = {
   line,
   input,
   exec,
+  isTTY: Boolean(process.stdin.isTTY && process.stderr.isTTY),
   get approve() {
     return approver();
   },

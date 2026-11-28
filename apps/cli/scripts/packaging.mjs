@@ -36,6 +36,14 @@ export const programOf = (target) => (target.os === 'windows' ? 'passhold.exe' :
 export const nodeArchiveOf = (nodeVersion, target) => `node-v${nodeVersion}-${target.node}.${target.os === 'windows' ? 'zip' : 'tar.gz'}`;
 export const nodeUrlOf = (nodeVersion, target) => `https://nodejs.org/dist/v${nodeVersion}/${nodeArchiveOf(nodeVersion, target)}`;
 
+/** A different zlib can give the same files a different archive and SHA-256. */
+export function checkBuildNode(runningVersion, pinnedVersion, fromTag) {
+  if (runningVersion === pinnedVersion) return;
+  const message = `This build is running on Node.js ${runningVersion}. The version pinned in packaging/node.json is ${pinnedVersion}. Archive bytes depend on the zlib of the Node.js running this script.`;
+  if (fromTag) throw new Error(message);
+  console.warn(`Warning: ${message}`);
+}
+
 /** The npm package's manifest: one file, run by the Node.js the person has. */
 export function npmManifest(version) {
   return {
@@ -104,7 +112,8 @@ end
 `;
 }
 
-const SCHEMA = '1.6.0';
+// winget-pkgs asks for its current schema (1.28.0 when 0.2.0 was sent).
+const SCHEMA = '1.28.0';
 // A plain YAML value may not hold ": " or start with most punctuation; one in single quotes holds anything but its own quote, doubled.
 const quoted = (text) => `'${text.replaceAll("'", "''")}'`;
 const schema = (kind) => `# yaml-language-server: $schema=https://aka.ms/winget-manifest.${kind}.${SCHEMA}.schema.json\n`;

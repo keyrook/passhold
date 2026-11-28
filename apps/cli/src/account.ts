@@ -16,6 +16,7 @@ import {
   familyCompareCode,
   finishSecondStep,
   HttpSyncAdapter,
+  MachineClient,
   namedClient,
   openFamily,
   openProductKey,
@@ -33,6 +34,7 @@ import {
   type Fetcher,
   type LoginResponse,
   type OrgRecord,
+  type OwnerProofFields,
   type ProductFamily,
   type ProductKey,
   type SignInProvider,
@@ -67,13 +69,14 @@ import {
   type PaidFeature,
   type Plan,
   type RemoteRecord,
+  type StoredAgentsState,
   type UnreadableRecord,
   type VaultData,
 } from '@passhold/core';
 import { CliError, type Vault } from './reference.js';
 import { UNLOCK_MINUTES, type Store, type StoredAccount, type StoredFamily, type Unlocked } from './store.js';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const OFFICIAL_API = 'https://api.keyrook.com';
 
 /**
@@ -178,15 +181,20 @@ export class Account {
 
   private keep(session: Pick<LoginResponse, 'accessToken' | 'refreshToken' | 'account'>, device: string): StoredAccount {
     const before = this.store.account();
+    const same = before?.accountId === session.account.id;
     const account: StoredAccount = {
       api: this.api,
       accountId: session.account.id,
       email: session.account.email,
       deviceId: device,
       tokens: { accessToken: session.accessToken, refreshToken: session.refreshToken },
-      // What was pinned stays only for the same account: another's root, or its families, say nothing of this one.
-      pinned: before?.accountId === session.account.id ? before.pinned : null,
-      ...(before?.accountId === session.account.id && before.families ? { families: before.families } : {}),
+      // What was pinned stays only for the same account: another's root, or its families/agents, say nothing of this one.
+      pinned: same ? before.pinned : null,
+      ...(same && before.keyGeneration ? { keyGeneration: before.keyGeneration } : {}),
+      ...(same && before.previousKey ? { previousKey: before.previousKey, previousKeyGeneration: before.previousKeyGeneration } : {}),
+      ...(same && before.agentsMovePending ? { agentsMovePending: true } : {}),
+      ...(same && before.families ? { families: before.families } : {}),
+      ...(same && before.agents ? { agents: before.agents } : {}),
     };
     this.store.lock();
     this.store.saveAccount(account);
@@ -253,7 +261,11 @@ export class Account {
   // --- Passhold's key ------------------------------------------------------------
 
   /** Passhold's key, opened as the account's flows open it: with the password's keys, or the root the recovery key opened. */
-  private async productKey(account: StoredAccount, unlockWith: { keys: AccountKeys } | { root: AccountRoot }, recoveryKeyTyped = false): Promise<{ key: CryptoKey; root: string }> {
+  private async productKey(
+    account: StoredAccount,
+    unlockWith: { keys: AccountKeys } | { root: AccountRoot },
+    recoveryKeyTyped = false,
+  ): Promise<{ key: CryptoKey; root: string; keyGeneration: number; rootGeneration: number; sheetVerifiedAt: number | null }> {
     const result = await openProductKey(this.adapter(account), {
       accountId: account.accountId,
       product: PRODUCT,
@@ -263,12 +275,18 @@ export class Account {
     });
     if (result.status === 'no-root') throw new CliError('This account has no keys yet. Open Passhold in a browser once, then unlock here.');
     if (result.status === 'awaiting-confirmation') throw new CliError('The account’s key was replaced. Open Passhold in a browser to confirm it, then unlock here.');
-    return { key: result.productKey.key, root: result.productKey.root };
+    return {
+      key: result.productKey.key,
+      root: result.productKey.root,
+      keyGeneration: result.productKey.keyGeneration,
+      rootGeneration: result.productKey.rootGeneration,
+      sheetVerifiedAt: result.productKey.sheetVerifiedAt,
+    };
   }
 
   private async opened(account: StoredAccount, unlockWith: { keys: AccountKeys } | { root: AccountRoot }, minutes: number, now: number, recoveryKeyTyped = false): Promise<string> {
-    const { key, root } = await this.productKey(account, unlockWith, recoveryKeyTyped);
-    return this.unlocked(account, key, root, minutes, now);
+    const { key, root, keyGeneration } = await this.productKey(account, unlockWith, recoveryKeyTyped);
+    return this.unlocked(account, key, root, keyGeneration, minutes, now);
   }
 
   /**
@@ -291,9 +309,92 @@ export class Account {
     }
   }
 
-  private async unlocked(account: StoredAccount, key: CryptoKey, root: string | null, minutes: number, now: number): Promise<string> {
-    if (root) this.store.saveAccount({ ...(this.store.account() ?? account), pinned: root });
-    const unlocked: Unlocked = { accountId: account.accountId, productKey: await exportDataKey(key), expiresAt: now + minutes * 60_000 };
+  /**
+   * Produces fresh `OwnerProofFields` directly from the owner's password (plus
+   * optional 2FA code/recovery key) for destructive or security-sensitive
+   * machine operations.
+   */
+  async ownerProof(secret: { password: string; secondStep?: string }): Promise<OwnerProofFields> {
+    const account = this.signedIn();
+    const { keys } = await passwordKeys(this.server, account.email, secret.password);
+    return {
+      authHash: keys.authHash,
+      ...(secret.secondStep ? { secondStep: { code: secret.secondStep.replace(/\s+/g, '') } } : {}),
+    };
+  }
+
+  /**
+   * Freshly unlocks Passhold's `ProductKey` at the terminal WITHOUT reading or
+   * writing `session.json` or `PASSHOLD_SESSION`. Used exclusively by
+   * `passhold approve`, which must never accept an existing CLI unlock.
+   */
+  async freshProductKey(
+    secret: { password: string } | { recoveryKey: string } | { browser: PairingAsk },
+  ): Promise<{ api: HttpSyncAdapter; productKey: ProductKey; previous: ProductKey | null; account: StoredAccount }> {
+    const account = this.signedIn();
+    const api = this.adapter(account);
+    let opened: { key: CryptoKey; root: string; keyGeneration: number; rootGeneration: number; sheetVerifiedAt: number | null };
+    if ('password' in secret) {
+      const { keys } = await passwordKeys(this.server, account.email, secret.password);
+      try {
+        opened = await this.productKey(account, { keys });
+      } catch (error) {
+        if (error instanceof CliError) throw error;
+        throw new CliError(`That password does not open this account (${said(error)})`);
+      }
+    } else if ('recoveryKey' in secret) {
+      let root: AccountRoot;
+      try {
+        root = await checkRecoveryKey(api, account.accountId, secret.recoveryKey);
+      } catch (error) {
+        throw new CliError(said(error));
+      }
+      opened = await this.productKey(account, { root }, true);
+    } else {
+      const keys = await newPairingKeys();
+      const { id, expiresAt } = await api.requestPairing({ publicKey: keys.publicKey, deviceName: deviceName() });
+      const until = Math.min(expiresAt, Date.now() + (secret.browser.timeoutMs ?? 5 * 60_000));
+      let shown = false;
+      let pairResult: { key: CryptoKey; root: string; keyGeneration: number } | null = null;
+      for (;;) {
+        const status = await api.pairingStatus(id);
+        if (status.approverKey && !shown) {
+          shown = true;
+          secret.browser.onCode(await pairingCode(account.accountId, id, keys.publicKey, status.approverKey));
+        }
+        if (status.status === 'approved' && status.approverKey && status.wrap) {
+          const key = await openPairedKey(account.accountId, keys, id, status.approverKey, status.wrap);
+          const state = await api.accountKeys();
+          const pin = state.box ? await readPassholdPin(key, state.box.pin, account.accountId) : null;
+          if (!pin) throw new CliError('The key that browser sent is not Passhold’s on this account. Nothing was taken.');
+          pairResult = { key, root: pin.root, keyGeneration: state.box?.keyGeneration ?? 1 };
+          break;
+        }
+        if (Date.now() >= until) throw new CliError('No Passhold browser answered in time. Open Passhold in a browser signed in to this account, and try again.');
+        await secret.browser.wait(1_500);
+      }
+      opened = { ...pairResult, rootGeneration: 1, sheetVerifiedAt: null };
+    }
+    const latest = this.store.account() ?? account;
+    const saved: StoredAccount = { ...latest, pinned: opened.root || latest.pinned, keyGeneration: opened.keyGeneration };
+    this.store.saveAccount(saved);
+    const productKey: ProductKey = {
+      accountId: saved.accountId,
+      product: PRODUCT,
+      key: opened.key,
+      keyGeneration: opened.keyGeneration,
+      root: opened.root,
+      rootGeneration: opened.rootGeneration,
+      sheetVerifiedAt: opened.sheetVerifiedAt,
+    };
+    const previous = await this.previousKeyOf(saved);
+    return { api, productKey, previous, account: saved };
+  }
+
+  private async unlocked(account: StoredAccount, key: CryptoKey, root: string | null, keyGeneration: number, minutes: number, now: number): Promise<string> {
+    const latest = this.store.account() ?? account;
+    this.store.saveAccount({ ...latest, ...(root ? { pinned: root } : {}), keyGeneration });
+    const unlocked: Unlocked = { accountId: account.accountId, productKey: await exportDataKey(key), keyGeneration, expiresAt: now + minutes * 60_000 };
     return this.store.saveSession(unlocked);
   }
 
@@ -346,7 +447,7 @@ export class Account {
         const state = await api.accountKeys();
         const pin = state.box ? await readPassholdPin(key, state.box.pin, account.accountId) : null;
         if (!pin) throw new CliError('The key that browser sent is not Passhold’s on this account. Nothing was taken.');
-        return this.unlocked(account, key, pin.root, minutes, now);
+        return this.unlocked(account, key, pin.root, state.box?.keyGeneration ?? 1, minutes, now);
       }
       if (Date.now() >= until) throw new CliError('No Passhold browser answered in time. Open Passhold in a browser signed in to this account, and try again.');
       await ask.wait(1_500);
@@ -390,10 +491,60 @@ export class Account {
   }
 
   /** Passhold's key in the account, as the account's flows take it. */
-  private async productKeyOf(account: StoredAccount, unlocked: Unlocked): Promise<ProductKey> {
+  private async productKeyOf(account: StoredAccount, unlocked: Unlocked, resolvedGeneration?: number): Promise<ProductKey> {
     if (account.accountId !== unlocked.accountId) throw new CliError('That unlock is for another account. Run: eval "$(passhold unlock)"');
     const key = await importDataKey(unlocked.productKey);
-    return { accountId: unlocked.accountId, product: PRODUCT, key, keyGeneration: 0, root: account.pinned ?? '', rootGeneration: 0, sheetVerifiedAt: null };
+    const keyGeneration = resolvedGeneration ?? unlocked.keyGeneration ?? account.keyGeneration ?? 1;
+    return { accountId: unlocked.accountId, product: PRODUCT, key, keyGeneration, root: account.pinned ?? '', rootGeneration: 1, sheetVerifiedAt: null };
+  }
+
+  private async previousKeyOf(account: StoredAccount): Promise<ProductKey | null> {
+    if (!account.previousKey || !account.previousKeyGeneration) return null;
+    return {
+      accountId: account.accountId,
+      product: PRODUCT,
+      key: await importDataKey(account.previousKey),
+      keyGeneration: account.previousKeyGeneration,
+      root: account.pinned ?? '',
+      rootGeneration: 1,
+      sheetVerifiedAt: null,
+    };
+  }
+
+  /** Session, Passhold's key (with verified positive `keyGeneration`), and optional previous key for owner agent flows. */
+  async agents(unlocked: Unlocked): Promise<{ api: HttpSyncAdapter; productKey: ProductKey; previous: ProductKey | null; account: StoredAccount }> {
+    const account = this.signedIn();
+    const api = this.adapter(account);
+    let gen = unlocked.keyGeneration ?? account.keyGeneration;
+    if (!gen || gen < 1) {
+      const state = await api.accountKeys();
+      gen = state.box?.keyGeneration ?? 1;
+      this.store.saveAccount({ ...(this.store.account() ?? account), keyGeneration: gen });
+    }
+    const latest = this.store.account() ?? account;
+    return {
+      api,
+      productKey: await this.productKeyOf(latest, unlocked, gen),
+      previous: await this.previousKeyOf(latest),
+      account: latest,
+    };
+  }
+
+  /** Updates persisted agent checkpoint/snapshot on `account.json`. */
+  saveAgentsState(agents: StoredAgentsState, options: { clearMove?: boolean } = {}): void {
+    const current = this.store.account();
+    if (!current) return;
+    if (options.clearMove) {
+      const { previousKey: _, previousKeyGeneration: __, agentsMovePending: ___, ...rest } = current;
+      this.store.saveAccount({ ...rest, agents });
+    } else {
+      this.store.saveAccount({ ...current, agents });
+    }
+  }
+
+  /** A machine-authenticated HTTP client targeting this API server. */
+  machineClient(): MachineClient {
+    return new MachineClient({ baseUrl: this.api, fetcher: this.fetcher });
   }
 
   /** The vault's own records, pulled and opened in memory, with the revision of each and of the account: what a write goes up over. */

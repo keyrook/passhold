@@ -41,3 +41,6 @@ export * from './webauthn/request.js';
 export * from './webauthn/authenticator.js';
 export * from './vault/attachments.js';
 export * from './account/files.js';
+export * from './agents/guard.js';
+export * from './agents/redact.js';
+export * from './account/agents.js';

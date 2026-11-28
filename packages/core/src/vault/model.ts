@@ -371,6 +371,16 @@ export interface AccountLink {
    * under it still opens here. Null the rest of the time.
    */
   previousKey: string | null;
+  /** The generation of `previousKey`, kept alongside it so agents can move to Passhold's new key (`moveAgentsToNewKey`). */
+  previousKeyGeneration?: number;
+  /** True while agents are still under `previousKey` and waiting to move or start afresh; keeps `previousKey` until settled. */
+  agentsMovePending?: boolean;
+  /**
+   * What this device last trusted of the account's agents: the directory
+   * checkpoint, the sealed state snapshot for `sendAgentsBack` on restore, and
+   * known agent item revisions.
+   */
+  agents?: StoredAgentsState;
   /**
    * The account's root this vault last saw Passhold's key sealed to: passed
    * back as `pinned`, so a server that hides or swaps the root is caught. The
@@ -470,6 +480,17 @@ export interface AccountKitLink {
   key: string | null;
   /** The key was shown and not yet said to be put away. */
   pending: boolean;
+}
+
+/** What this device remembers of the account's agents: directory pin, sealed snapshot for restore, and known item revisions. */
+export interface StoredAgentsState {
+  checkpoint: { version: number; digest: string };
+  /** The last verified `AgentsState` (sealed boxes as returned by the server), kept for `sendAgentsBack` if the server is restored. */
+  state?: Record<string, unknown>;
+  /** Known agent vault item versions/revisions, keyed by `${vaultId}:${itemId}`, for anti-rollback. */
+  known?: Record<string, { version: number; rev: number }>;
+  /** Last audit log revision read by this device. */
+  auditRev?: number;
 }
 
 /** What the payload holds once opened. Never written anywhere unsealed. */

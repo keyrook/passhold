@@ -13,6 +13,7 @@ import { UnlockScreen } from '../popup/UnlockScreen.js';
 import { deviceAvailable } from '../ui/device.js';
 import { setPasswordName } from '../ui/passwordName.js';
 import { AccountPanel } from './AccountPanel.js';
+import { AgentsPanel } from './AgentsPanel.js';
 import { EmergencyPanel } from './EmergencyPanel.js';
 import { SendPanel } from './SendPanel.js';
 import { BackupPanel, type BackupJob } from './BackupPanel.js';
@@ -28,17 +29,17 @@ import { SecurityPanel } from './SecurityPanel.js';
 
 const SOURCE = 'https://github.com/keyrook/passhold';
 
-type Tab = 'passwords' | 'account' | 'send' | 'family' | 'security' | 'general';
+type Tab = 'passwords' | 'account' | 'agents' | 'send' | 'family' | 'security' | 'general';
 
 /**
  * Four tabs: the logins themselves (with what needs attention and the trash),
  * the account they sync with (with backups beside it), how Passhold opens,
- * and how it behaves; and a fifth once the account is in a family, for who
- * is in it and what it shares.
+ * and how it behaves; and tabs for agents, Send, and family when available.
  */
 const TABS: { id: Tab; label: MessageKey; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { id: 'passwords', label: 'nav.passwords', Icon: KeyIcon },
   { id: 'account', label: 'nav.accountSync', Icon: CloudIcon },
+  { id: 'agents', label: 'nav.agents', Icon: CodeIcon },
   { id: 'send', label: 'send.title', Icon: ShareIcon },
   { id: 'family', label: 'nav.family', Icon: UsersIcon },
   { id: 'security', label: 'nav.security', Icon: LockIcon },
@@ -57,7 +58,7 @@ function fromHash(): { tab: Tab; job: BackupJob | null; view: PasswordsView } {
   if (hash === 'restore' || hash === 'import' || hash === 'export') return at('account', hash);
   if (hash === 'checkup') return at('passwords', null, 'attention');
   if (hash === 'trash') return at('passwords', null, 'trash');
-  if (hash === 'security' || hash === 'general' || hash === 'account' || hash === 'passwords' || hash === 'family' || hash === 'send') return at(hash);
+  if (hash === 'security' || hash === 'general' || hash === 'account' || hash === 'agents' || hash === 'passwords' || hash === 'family' || hash === 'send') return at(hash);
   // From the popup's Send a copy, naming the login.
   if (hash.startsWith('send=')) return at('send');
   // From the popup's Attach a file, naming the item: a file is chosen here.
@@ -103,6 +104,26 @@ export function App() {
   const data = status?.state === 'unlocked' ? status.data : null;
   const linked = status?.state === 'unlocked' && status.account !== null;
   const attention = useMemo(() => (data ? checkup(data, Date.now(), linked).issues > 0 : false), [data, linked]);
+  const [agentPending, setAgentPending] = useState(0);
+
+  useEffect(() => {
+    if (!linked) {
+      setAgentPending(0);
+      return;
+    }
+    let alive = true;
+    void send({ type: 'agents/pending' }).then(
+      (res) => {
+        if (alive) setAgentPending(res.count);
+      },
+      () => {
+        if (alive) setAgentPending(0);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [linked, tab, visit]);
 
   useEffect(() => {
     document.title = `${t('settings.title')} · ${APP_NAME}`;
@@ -190,7 +211,7 @@ export function App() {
           </div>
 
           <nav aria-label={t('settings.title')} className="flex flex-col gap-1">
-            {TABS.filter(({ id }) => (id !== 'family' || status.data.families.length > 0) && (id !== 'send' || (status.account !== null && (status.plan.send || status.plan.offered)))).map(({ id, label, Icon }) => (
+            {TABS.filter(({ id }) => (id !== 'family' || status.data.families.length > 0) && (id !== 'agents' || status.account !== null) && (id !== 'send' || (status.account !== null && (status.plan.send || status.plan.offered)))).map(({ id, label, Icon }) => (
               <button
                 key={id}
                 type="button"
@@ -208,6 +229,14 @@ export function App() {
                 <Icon className={cx('h-[18px] w-[18px] shrink-0', tab === id ? 'text-brand-600 dark:text-brand-400' : 'text-neutral-400 dark:text-neutral-500')} />
                 {t(label)}
                 {id === 'passwords' && attention && <span className="ms-auto h-2 w-2 rounded-full bg-yellow-500" aria-hidden="true" data-testid="nav-attention" />}
+                {id === 'agents' && agentPending > 0 && (
+                  <span
+                    className="ms-auto inline-flex min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold text-white"
+                    data-testid="nav-agents-pending"
+                  >
+                    {agentPending > 99 ? '99+' : agentPending}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -284,6 +313,7 @@ export function App() {
               />
             </>
           )}
+          {tab === 'agents' && status.account && <AgentsPanel onPendingChange={setAgentPending} />}
           {tab === 'send' && status.account && <SendPanel data={status.data} secret={status.secret} device={status.device} keys={status.keys} itemId={SEND_ITEM} />}
           {tab === 'family' && <FamilyPanel data={status.data} me={status.account?.accountId ?? null} passwordless={status.account?.passwordless ?? false} />}
           {tab === 'general' && <GeneralPanel data={status.data} />}

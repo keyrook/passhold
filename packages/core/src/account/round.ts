@@ -136,9 +136,18 @@ export async function syncOwnRecords(
     const account = data.account!;
     const known = acceptPushed(account.known, planned.plan, accepted);
     const merged = await applyPulled(data, known, conflicts, keys.records, keys.previous);
-    // Every record sealed again under the new key and on the server: the one before is let go.
-    const previousKey = account.previousKey && allSent(merged.known) ? null : account.previousKey;
-    return { data: { ...merged.data, account: { ...account, known: merged.known, lastSyncAt: Date.now(), previousKey } }, value: undefined };
+    // Every record sealed again under the new key and on the server: the one before is let go,
+    // unless agents still need it to move (`moveAgentsToNewKey`).
+    const dropPrevious = Boolean(account.previousKey) && allSent(merged.known) && account.agentsMovePending !== true;
+    const { previousKeyGeneration: prevGen, ...restAccount } = account;
+    const nextAccount: AccountLink = {
+      ...restAccount,
+      known: merged.known,
+      lastSyncAt: Date.now(),
+      previousKey: dropPrevious ? null : account.previousKey,
+      ...(!dropPrevious && prevGen !== undefined ? { previousKeyGeneration: prevGen } : {}),
+    };
+    return { data: { ...merged.data, account: nextAccount }, value: undefined };
   });
   return { removed: planned.removed, skipped: planned.skipped, again: conflicts.length > 0 };
 }

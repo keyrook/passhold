@@ -61,6 +61,11 @@ export * from './flows/link.js';
 export * from './keys/link.js';
 export * from './keys/send.js';
 export * from './flows/files.js';
+// Machines and agent vaults: the agent authority, a machine's boxes, what it
+// asks and is released, its log, and what Passhold pins of each.
+export * from './keys/machine.js';
+export * from './flows/machine.js';
+export * from './sync/machine-http.js';
 
 // Utilities worth exposing to app code
 export { crockfordDecode, crockfordEncode, group } from './util/crockford.js';

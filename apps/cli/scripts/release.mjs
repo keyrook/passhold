@@ -31,6 +31,7 @@ import { dirname, join, resolve } from 'node:path';
 import { tarGz, zip } from './archive.mjs';
 import {
   assetOf,
+  checkBuildNode,
   folderOf,
   FORMULA,
   homebrewFormula,
@@ -80,6 +81,7 @@ if (args.has('--pin-node')) {
 // --- what it is built from -------------------------------------------------------
 
 if (argv.includes('--ref') && !ref) throw new Error('--ref names a tag: --ref cli-v' + version + '.');
+checkBuildNode(process.versions.node, pins.version, Boolean(ref));
 if (ref) {
   if (ref !== tagOf(version)) throw new Error(`The package is ${version}, so its tag is ${tagOf(version)}, not ${ref}.`);
   // Under refs/tags/ by name: a branch called the same would pass for it otherwise.

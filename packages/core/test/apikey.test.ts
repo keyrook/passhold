@@ -24,18 +24,24 @@ import {
   importFileBytes,
   importOnePux,
   joinWalletItem,
+  mergeFamilyPulled,
+  planFamilyPush,
   planPush,
   recordsKey,
   restoreWalletVersion,
+  sealJson,
   searchWallet,
   serviceOfKey,
   updateWalletItem,
+  utf8,
   walletOf,
   walletTitle,
   withService,
   WALLET_KIND,
   type ApiKeyDraft,
   type ApiKeyItem,
+  type FamilyVault,
+  type RemoteRecord,
   type VaultData,
 } from '@passhold/core';
 import { readZipEntry } from '../src/import/zip.js';
@@ -425,5 +431,66 @@ describe('an API key, never written to a log', () => {
     expect(`${refused!.message} ${refused!.stack}`).not.toContain(GITHUB);
     expect(said.join('\n')).not.toContain(STRIPE);
     expect(said.join('\n')).not.toContain(GITHUB);
+  });
+});
+
+describe('older builds never lose an unknown wallet kind on sync', () => {
+  it('leaves an unrecognized wallet record alone in personal and family sync without pushing a deletion or overwrite', async () => {
+    const key = await recordsKey(await generateDataKey());
+    // Simulate a record created by a newer Passhold build with a future wallet kind.
+    const futureId = 'future-item-1';
+    const futurePayload = { kind: 'future_secret_v2', id: futureId, title: 'Future item', secret: 'keep-me-safe', updatedAt: 5_000 };
+    const box = await sealJson(key, { kind: WALLET_KIND, item: futurePayload }, utf8(`passhold.record:v1:${futureId}:${WALLET_KIND}:1`));
+    const remote: RemoteRecord = {
+      id: futureId,
+      kind: WALLET_KIND,
+      rev: 1,
+      deleted: false,
+      serverRev: 1,
+      updatedAt: 5_000,
+      deviceId: 'newer-device',
+      box,
+    };
+
+    // Personal vault: older client cannot decode `future_secret_v2`, so `applyPulled` skips it without adding to `known`,
+    // and `planPush` does not emit a tombstone or overwrite for `futureId`.
+    const pulled = await applyPulled(emptyData(), {}, [remote], key);
+    expect(pulled.skipped).toBe(1);
+    expect(pulled.data.wallet).toEqual([]);
+    expect(pulled.known[futureId]).toBeUndefined();
+
+    // Even after editing another item locally, `futureId` is never touched or deleted.
+    const edited = addWalletItem(pulled.data, { kind: 'note', title: 'Local note', text: 'hello' }, 6_000);
+    const plan = await planPush(edited.data, pulled.known, key, 'older-device');
+    expect(plan.records.map((r) => r.id)).toEqual([edited.item.id]);
+    expect(plan.records.some((r) => r.id === futureId)).toBe(false);
+
+    // Family vault: same invariant via `mergeFamilyPulled` + `planFamilyPush`.
+    const familyVault: FamilyVault = {
+      id: 'col-1',
+      name: 'Shared',
+      generation: 1,
+      keyDue: false,
+      items: [],
+      wallet: [],
+      known: {},
+    };
+    const familyMerged = await mergeFamilyPulled(familyVault, [
+      {
+        collectionId: 'col-1',
+        id: futureId,
+        kind: WALLET_KIND,
+        rev: 1,
+        deleted: false,
+        stale: false,
+        value: { kind: WALLET_KIND, item: futurePayload },
+      },
+    ]);
+    expect(familyMerged.skipped).toBe(1);
+    expect(familyMerged.vault.wallet).toEqual([]);
+    expect(familyMerged.vault.known[futureId]).toBeUndefined();
+
+    const familyPlan = await planFamilyPush(familyMerged.vault, familyMerged.vault.known, 7_000);
+    expect(familyPlan.records).toEqual([]);
   });
 });

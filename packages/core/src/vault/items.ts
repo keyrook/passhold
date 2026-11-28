@@ -240,12 +240,19 @@ function cleanAccount(value: unknown): AccountLink | null {
   const access = tokens ? short(tokens.accessToken, 4096) : null;
   const refresh = tokens ? short(tokens.refreshToken, 4096) : null;
   const known = cleanKnown(raw.known);
+  const previousKey = keyed ? short(raw.previousKey, 64) : null;
+  const agents = keyed ? cleanAgentsState(raw.agents) : undefined;
   return {
     email,
     deviceId,
     accountId: keyed ? accountId : null,
     productKey: keyed ? productKey : null,
-    previousKey: keyed ? short(raw.previousKey, 64) : null,
+    previousKey,
+    ...(previousKey && Number.isSafeInteger(raw.previousKeyGeneration) && (raw.previousKeyGeneration as number) >= 1
+      ? { previousKeyGeneration: raw.previousKeyGeneration as number }
+      : {}),
+    ...(keyed && raw.agentsMovePending === true ? { agentsMovePending: true } : {}),
+    ...(agents ? { agents } : {}),
     root: keyed ? short(raw.root, 128) : null,
     keyGeneration: keyed ? generation(raw.keyGeneration) : 1,
     rootGeneration: keyed ? generation(raw.rootGeneration) : 1,
@@ -274,6 +281,39 @@ function cleanAccount(value: unknown): AccountLink | null {
 function filesToDeleteOf(value: unknown): { filesToDelete?: string[] } {
   const ids = readFileIds(value);
   return ids.length ? { filesToDelete: ids } : {};
+}
+
+function cleanAgentsState(value: unknown): AccountLink['agents'] {
+  const raw = record(value);
+  const cp = raw ? record(raw.checkpoint) : null;
+  const version = cp && Number.isSafeInteger(cp.version) && (cp.version as number) >= 1 ? (cp.version as number) : null;
+  const digest = cp ? short(cp.digest, 64) : null;
+  if (!raw || version === null || !digest) return undefined;
+  const known: Record<string, { version: number; rev: number }> = {};
+  const rawKnown = record(raw.known);
+  if (rawKnown) {
+    for (const [id, entry] of Object.entries(rawKnown)) {
+      const item = record(entry);
+      if (
+        id.length <= 260 &&
+        item &&
+        Number.isSafeInteger(item.version) &&
+        (item.version as number) >= 1 &&
+        Number.isSafeInteger(item.rev) &&
+        (item.rev as number) >= 0
+      ) {
+        known[id] = { version: item.version as number, rev: item.rev as number };
+      }
+    }
+  }
+  const state = record(raw.state);
+  const auditRev = Number.isSafeInteger(raw.auditRev) && (raw.auditRev as number) >= 0 ? (raw.auditRev as number) : undefined;
+  return {
+    checkpoint: { version, digest },
+    ...(state ? { state } : {}),
+    ...(Object.keys(known).length ? { known } : {}),
+    ...(auditRev !== undefined ? { auditRev } : {}),
+  };
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
