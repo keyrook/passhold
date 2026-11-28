@@ -127,6 +127,11 @@ export function buildManifest({ version, api = OFFICIAL_API, built, test = false
     // clear a copied password after a while. None carries an install warning.
     permissions: ['storage', 'alarms', 'idle', 'offscreen', 'clipboardWrite'],
 
+    // Optional native messaging bridge for `passhold mcp` (`fill_login`):
+    // zero install-time prompt; granted only if the owner enables browser fill
+    // in Settings → Agents.
+    optional_permissions: ['nativeMessaging'],
+
     // Signing in with one of the Keyrook account's passkeys: Chrome lets an
     // extension use a site's passkeys only with the host permission for that
     // site. Optional, so nothing at install; asked for when its owner chooses

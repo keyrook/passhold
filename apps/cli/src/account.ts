@@ -76,7 +76,7 @@ import {
 import { CliError, type Vault } from './reference.js';
 import { UNLOCK_MINUTES, type Store, type StoredAccount, type StoredFamily, type Unlocked } from './store.js';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 export const OFFICIAL_API = 'https://api.keyrook.com';
 
 /**
@@ -772,6 +772,57 @@ export class Account {
       throw error;
     }
     return id;
+  }
+
+  /** Batches multiple new items into one push for `passhold import --env`. */
+  async writeMany(unlocked: Unlocked, opened: Opened, vault: Vault, changes: Change[]): Promise<string[]> {
+    if (!changes.length) return [];
+    const account = this.signedIn();
+    const productKey = await this.productKeyOf(account, unlocked);
+    const api = this.adapter(account);
+    const ids: string[] = [];
+    if (vault.orgId === null) {
+      let current: VaultData = opened.data;
+      for (const change of changes) {
+        const applied = change(current);
+        current = applied.items as VaultData;
+        ids.push(applied.id);
+      }
+      const wanted = new Set(ids);
+      const plan = await planPush(current, opened.known, await recordsKey(productKey.key), account.deviceId);
+      const records = plan.records.filter((record) => wanted.has(record.id));
+      if (records.length) {
+        const pushed = await api.push(records, opened.serverRev);
+        for (const id of ids) this.landed(pushed, id);
+      }
+      return ids;
+    }
+    if (vault.viewOnly) throw new CliError(`You can view ${vault.name}, not change it.`);
+    if (vault.keyDue) throw new CliError(`Someone who left ${vault.family} still holds the key to ${vault.name}. Nothing is written to it until an organiser changes it, as their Passhold does when it syncs.`);
+    const family = opened.families.get(vault.orgId);
+    const shared = opened.data.families.find((entry) => entry.orgId === vault.orgId)?.vaults.find((entry) => entry.id === vault.id);
+    if (!family || !shared) throw new CliError(`${vault.name} is not open here. Run the command again.`);
+    let current: FamilyVault = shared;
+    for (const change of changes) {
+      const applied = change(current);
+      current = applied.items as FamilyVault;
+      ids.push(applied.id);
+    }
+    const wanted = new Set(ids);
+    const plan = await planFamilyPush(current, shared.known);
+    const sealed: OrgRecord[] = [];
+    for (const record of plan.records.filter((entry) => wanted.has(entry.id))) {
+      sealed.push(await sealFamilyRecord(family, { collectionId: vault.id, id: record.id, kind: record.kind, rev: record.rev, value: record.value, updatedAt: record.updatedAt, deviceId: account.deviceId }));
+    }
+    if (!sealed.length) return ids;
+    try {
+      const pushed = await pushFamily<FamilyValue>(api, family, sealed);
+      for (const id of ids) this.landed(pushed, id);
+    } catch (error) {
+      if (error instanceof SyncHttpError && error.status === 409) throw new CliError(`The key to ${vault.name} changed just now, so nothing was written. Run the command again.`);
+      throw error;
+    }
+    return ids;
   }
 
   /** What the server did with the one item sent: taken, or refused with nothing kept anywhere — said, never passed over. */

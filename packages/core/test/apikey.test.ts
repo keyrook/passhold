@@ -25,10 +25,14 @@ import {
   importOnePux,
   joinWalletItem,
   mergeFamilyPulled,
+  parseAgentInboxApiKey,
+  parseEnvEntries,
   planFamilyPush,
   planPush,
+  readEnvApiKeys,
   recordsKey,
   restoreWalletVersion,
+  buildMcpConfigSnippet,
   sealJson,
   searchWallet,
   serviceOfKey,
@@ -492,5 +496,60 @@ describe('older builds never lose an unknown wallet kind on sync', () => {
 
     const familyPlan = await planFamilyPush(familyMerged.vault, familyMerged.vault.known, 7_000);
     expect(familyPlan.records).toEqual([]);
+  });
+});
+
+describe('.env import, inbox normalization, and MCP config helpers', () => {
+  it('parses .env files with quotes, comments, export prefix, and skips blanks and passhold:// references', () => {
+    const raw = [
+      '\uFEFF# Top comment',
+      'export STRIPE_API_KEY="sk_live_EnvTestStripe0000001"',
+      "GITHUB_TOKEN='ghp_EnvTestGithub0000000000000000000000'",
+      'QUOTED_ESCAPES="line1\\nline2\\"ok\\""',
+      'INLINE_COMMENT=secret_val # trailing note',
+      'EMPTY_LINE=',
+      'ALREADY_REF=passhold://Personal/Item/key',
+      'INLINE_COMMENT=updated_val',
+    ].join('\n');
+    expect(parseEnvEntries(raw)).toEqual([
+      { env: 'STRIPE_API_KEY', value: 'sk_live_EnvTestStripe0000001' },
+      { env: 'GITHUB_TOKEN', value: 'ghp_EnvTestGithub0000000000000000000000' },
+      { env: 'QUOTED_ESCAPES', value: 'line1\nline2"ok"' },
+      { env: 'INLINE_COMMENT', value: 'updated_val' },
+    ]);
+
+    const imported = readEnvApiKeys(raw, emptyData());
+    expect(imported.wallet).toHaveLength(4);
+    const stripe = imported.wallet.find((w) => w.kind === 'apikey' && w.env === 'STRIPE_API_KEY') as ApiKeyDraft;
+    expect(stripe.service).toBe('stripe');
+    expect(stripe.hosts).toEqual(['api.stripe.com']);
+  });
+
+  it('normalizes inbox API key entries and strips unsafe wildcard suffix hosts', () => {
+    const parsed = parseAgentInboxApiKey({
+      title: 'Stripe sandbox',
+      key: 'sk_test_InboxKey00000001',
+      hosts: ['api.stripe.com', '*.com', 'bad host'],
+      reason: 'Generated in sandbox',
+    });
+    expect(parsed).toMatchObject({
+      kind: 'apikey',
+      title: 'Stripe sandbox',
+      service: 'stripe',
+      hosts: ['api.stripe.com'],
+      sendAs: 'bearer',
+      reason: 'Generated in sandbox',
+    });
+    expect(parseAgentInboxApiKey({ title: 'Missing key' })).toBeNull();
+  });
+
+  it('builds valid MCP config snippets for standard, Cursor, VS Code, raw, and custom API', () => {
+    expect(JSON.parse(buildMcpConfigSnippet('standard'))).toEqual({
+      mcpServers: { passhold: { command: 'passhold', args: ['mcp'] } },
+    });
+    expect(JSON.parse(buildMcpConfigSnippet('vscode', { apiUrl: 'https://sandbox.example' }))).toEqual({
+      servers: { passhold: { type: 'stdio', command: 'passhold', args: ['mcp'], env: { PASSHOLD_API: 'https://sandbox.example' } } },
+    });
+    expect(buildMcpConfigSnippet('raw')).toBe('passhold mcp\n');
   });
 });

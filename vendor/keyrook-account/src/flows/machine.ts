@@ -44,6 +44,7 @@ import {
   openAgentVaultName,
   openMachineAnswer,
   openMachineDecisionRecord,
+  openMachineInboxEntry,
   openMachineItem,
   openMachineLogEntry,
   openMachinePin,
@@ -58,6 +59,7 @@ import {
   sealAgentVaultName,
   sealMachineAnswer,
   sealMachineDecisionRecord,
+  sealMachineInboxEntry,
   sealMachineItem,
   sealMachineLogEntry,
   sealMachinePin,
@@ -104,6 +106,7 @@ import type {
   MachineGrant,
   MachineGrantChange,
   MachineHourView,
+  MachineInboxReceipt,
   MachineListing,
   MachineLogAck,
   MachineLogBatch,
@@ -1593,6 +1596,91 @@ export async function denyMachineUse(
 export async function resumeMachine(api: Pick<RequestApi, 'resumeMachine'>, trusted: TrustedAgents, machineId: string, proof: OwnerProofFields, now = Date.now()): Promise<void> {
   liveMachine(trusted, machineId, now);
   await api.resumeMachine(machineId, proof);
+}
+
+/** One sealed entry a machine handed the person, opened and authenticated against its pinned key. */
+export interface OpenedMachineInboxEntry {
+  id: string;
+  machineId: string;
+  machineName: string;
+  body: Record<string, unknown>;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** Pending inbox entries opened for review, beside the count of entries that did not open. */
+export interface MachineInboxRead {
+  entries: OpenedMachineInboxEntry[];
+  unreadable: number;
+}
+
+/**
+ * The machine's side: seals an entry to the authority and hands it to the
+ * server for the person to review and accept into an agent vault. Never
+ * discloses the entry to the server; an identical retry with the same `id`
+ * is answered as it was.
+ */
+export async function sendMachineInboxEntry(
+  client: Pick<MachineClient, 'submitInbox'>,
+  machine: MachineIdentity,
+  body: Record<string, unknown>,
+  options: { id?: string } = {},
+): Promise<MachineInboxReceipt> {
+  const { accountId, machineId } = machine.credentials;
+  const entryId = options.id ?? newId();
+  const box = await sealMachineInboxEntry(machine.key, machine.pinned, accountId, machineId, entryId, body);
+  const receipt = await endsAsks(machine, () => client.submitInbox(machine.credentials, { id: entryId, box }));
+  if (receipt.id !== entryId) throw new DecryptionError('The server returned an inbox receipt for another entry.');
+  return receipt;
+}
+
+/**
+ * Reads pending inbox entries from the account's machines. Each entry must
+ * open with the authority (or a retired key it carries) as from the point
+ * this device pinned for the machine it is filed under, bound to its own id.
+ */
+export async function readMachineInbox(
+  api: Pick<HttpSyncAdapter, 'agentInbox'>,
+  trusted: TrustedAgents,
+  passhold: ProductKey,
+): Promise<MachineInboxRead> {
+  ownerOf(trusted, passhold, false);
+  const { accountId } = trusted;
+  const keys = [trusted.authority.box, ...trusted.authority.retired];
+  const page = await api.agentInbox();
+  const entries: OpenedMachineInboxEntry[] = [];
+  const seen = new Set<string>();
+  let unreadable = 0;
+  for (const view of page.entries) {
+    const at = `${view.machineId}:${view.id}`;
+    const pin = trusted.pins.get(view.machineId);
+    const machine = trusted.directory.machines.find((entry) => entry.id === view.machineId);
+    if (!pin || !machine || machine.removed || seen.has(at)) {
+      unreadable += 1;
+      continue;
+    }
+    let body: Record<string, unknown> | null = null;
+    for (const key of keys) {
+      try {
+        body = await openMachineInboxEntry(key, pin.key, view.box, accountId, view.machineId, view.id);
+        break;
+      } catch {
+        // Sealed to another of the authority's keys, or not the machine's at all.
+      }
+    }
+    if (!body) {
+      unreadable += 1;
+      continue;
+    }
+    seen.add(at);
+    entries.push({ id: view.id, machineId: view.machineId, machineName: pin.name, body, createdAt: view.createdAt, expiresAt: view.expiresAt });
+  }
+  return { entries, unreadable };
+}
+
+/** Removes one inbox entry once the person has accepted or dismissed it. */
+export async function dismissMachineInboxEntry(api: Pick<HttpSyncAdapter, 'deleteAgentInbox'>, machineId: string, entryId: string): Promise<void> {
+  await api.deleteAgentInbox(machineId, entryId);
 }
 
 /**

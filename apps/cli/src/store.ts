@@ -199,7 +199,7 @@ async function cacheKeyFor(machineKey: MemberKey, accountId: string, machineId: 
 const cacheAad = (accountId: string, machineId: string) => utf8(`passhold.machine-cache:v1:${accountId}:${machineId}`);
 
 export class Store {
-  constructor(private readonly home: string) {}
+  constructor(readonly home: string) {}
 
   private path(name: string): string {
     return join(this.home, name);

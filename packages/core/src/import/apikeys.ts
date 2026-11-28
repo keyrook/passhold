@@ -124,3 +124,69 @@ export function isBwsList(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0 && value.every((entry) => record(entry)?.object === 'secret' || (typeof record(entry)?.key === 'string' && typeof record(entry)?.value === 'string' && 'projectId' in record(entry)!));
 }
 
+const ENV_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
+
+function unquoteEnvValue(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('"')) {
+    let out = '';
+    for (let i = 1; i < trimmed.length; i++) {
+      const ch = trimmed[i]!;
+      if (ch === '\\' && i + 1 < trimmed.length) {
+        const next = trimmed[++i]!;
+        if (next === 'n') out += '\n';
+        else if (next === 'r') out += '\r';
+        else if (next === 't') out += '\t';
+        else out += next;
+        continue;
+      }
+      if (ch === '"') return out;
+      out += ch;
+    }
+    return out;
+  }
+  if (trimmed.startsWith("'")) {
+    const end = trimmed.indexOf("'", 1);
+    return end >= 1 ? trimmed.slice(1, end) : trimmed.slice(1);
+  }
+  // Strip trailing inline comment preceded by whitespace for unquoted values.
+  return trimmed.replace(/\s+#.*$/, '').trim();
+}
+
+/**
+ * Parses `KEY=VALUE` entries from a `.env` file, skipping comments, blank
+ * lines, empty values, and existing `passhold://` references. Later lines for
+ * the same variable name replace earlier ones.
+ */
+export function parseEnvEntries(text: string): { env: string; value: string }[] {
+  const cleaned = text.replace(/^\uFEFF/, '');
+  const byKey = new Map<string, string>();
+  for (const line of cleaned.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const match = ENV_LINE.exec(line);
+    if (!match) continue;
+    const env = match[1]!;
+    const value = unquoteEnvValue(match[2]!);
+    if (!value || value.startsWith('passhold://')) continue;
+    byKey.set(env, value);
+  }
+  return [...byKey.entries()].map(([env, value]) => ({ env, value }));
+}
+
+/**
+ * Imports a `.env` file as API key items: each variable becomes an API key
+ * whose `env` is the variable name and whose service, hosts, and delivery
+ * defaults are inferred automatically from known key prefixes.
+ */
+export function readEnvApiKeys(text: string, vault: Pick<VaultData, 'items' | 'wallet'>): ImportResult {
+  const entries = parseEnvEntries(text);
+  if (!entries.length) throw new PassholdError('importEmpty');
+  if (entries.length > MAX_IMPORT_ROWS) throw new PassholdError('importTooLarge');
+  const into = collector(vault);
+  for (const { env, value } of entries) {
+    into.keep(apiKeyFrom({ title: env, key: value, env: cleanEnvName(env) }), env, '');
+  }
+  return into.done('generic');
+}
+

@@ -12,6 +12,7 @@ import {
   confirmMachineEnrollment,
   createAgentVault,
   createMachineToken,
+  dismissMachineInboxEntry,
   finishMachineRekey,
   forgetMachines,
   giveMachineItems,
@@ -27,6 +28,7 @@ import {
   putAgentItem,
   readMachineAudit,
   readMachineCalls,
+  readMachineInbox,
   readMachineStatus,
   removeMachine,
   renewMachine,
@@ -51,8 +53,12 @@ import {
   type TrustedAgents,
 } from '@keyrook/account';
 import {
+  agentApiKeyFromInbox,
   agentItemFromLogin,
   agentItemFromWallet,
+  apiKeyFrom,
+  buildMcpConfigSnippet,
+  cleanEnvName,
   describeAgentItem,
   exposedKeysFor,
   extractAgentField,
@@ -60,11 +66,14 @@ import {
   listAgentMachines,
   mergeKnownAgentItems,
   openOrRecoverAgents,
+  parseAgentInboxApiKey,
+  parseEnvEntries,
   refreshEditedAgentItemGrants,
   toStoredAgentsState,
   type AgentItemValue,
   type ApiKeyItem,
   type LoginItem,
+  type McpClientKind,
   type NoteItem,
   type SshKeyItem,
 } from '@passhold/core';
@@ -372,11 +381,23 @@ export async function runMachine(
   const [sub, ...rest] = positional;
   if (!sub) {
     throw new CliError(
-      'Usage: passhold machine <enroll|status|pull|init|list|invite|confirm|token|grant|withdraw|rekey|remove|stop-all|resume|renew|forget|exposed|audit|move|send-back|reset|vault>',
+      'Usage: passhold machine <enroll|status|pull|config|init|list|invite|confirm|token|grant|withdraw|rekey|remove|stop-all|resume|renew|forget|exposed|audit|inbox|move|send-back|reset|vault>',
     );
   }
 
   // --- Machine-side subcommands (free on EVERY plan, no owner session) -------------------
+  if (sub === 'config') {
+    const clientRaw = (flagText(flags, 'client') ?? 'standard').toLowerCase();
+    const allowed: readonly McpClientKind[] = ['standard', 'cursor', 'vscode', 'raw'];
+    if (!allowed.includes(clientRaw as McpClientKind)) {
+      throw new CliError(`--client must be one of: ${allowed.join(', ')}`);
+    }
+    const command = flagText(flags, 'command') ?? 'passhold';
+    const apiUrl = account.api !== 'https://api.keyrook.com' ? account.api : undefined;
+    const snippet = buildMcpConfigSnippet(clientRaw as McpClientKind, { command, ...(apiUrl ? { apiUrl } : {}) });
+    context.out(snippet);
+    return 0;
+  }
   if (sub === 'enroll') {
     const invitation = rest[0] || (await context.secret('Invitation (phi_...): ')).trim();
     if (!invitation) throw new CliError('Usage: passhold machine enroll <phi_...>');
@@ -812,6 +833,10 @@ export async function runMachine(
       return 0;
     }
 
+    case 'inbox': {
+      return runMachineInbox(context, rest, ctx, trusted, deps);
+    }
+
     case 'vault': {
       return runMachineVault(context, rest, ctx, trusted, deps);
     }
@@ -819,6 +844,146 @@ export async function runMachine(
     default:
       throw new CliError(`Unknown machine subcommand "${sub}".`);
   }
+}
+
+async function runMachineInbox(
+  context: Context,
+  rest: string[],
+  ctx: Awaited<ReturnType<typeof openOwnerAgents>>,
+  trusted: TrustedAgents,
+  deps: MachineCommandDeps,
+): Promise<number> {
+  const { account, say, flags } = deps;
+  const [verb = 'list', ...args] = rest;
+  const inbox = await readMachineInbox(ctx.api, trusted, ctx.productKey);
+  const parsed = inbox.entries
+    .map((entry) => {
+      const candidate = parseAgentInboxApiKey(entry.body);
+      return candidate ? { ...entry, candidate } : null;
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  if (verb === 'list') {
+    if (flags.has('json')) {
+      context.out(
+        `${JSON.stringify(
+          parsed.map((entry) => ({
+            id: entry.id,
+            machineId: entry.machineId,
+            machineName: entry.machineName,
+            title: entry.candidate.title,
+            service: entry.candidate.service,
+            hosts: entry.candidate.hosts,
+            env: entry.candidate.env,
+            environment: entry.candidate.environment,
+            reason: entry.candidate.reason,
+            createdAt: entry.createdAt,
+            expiresAt: entry.expiresAt,
+          })),
+          null,
+          2,
+        )}\n`,
+      );
+    } else {
+      for (const entry of parsed) {
+        context.out(
+          `${[entry.id, entry.machineName, entry.candidate.title, entry.candidate.service || '-', entry.candidate.hosts.join(',') || '-', entry.candidate.reason || ''].join('\t')}\n`,
+        );
+      }
+      if (!parsed.length) say('No pending items in the agent inbox.');
+    }
+    return 0;
+  }
+
+  const targetId = args[0];
+  if (!targetId) {
+    throw new CliError(verb === 'accept' ? 'Usage: passhold machine inbox accept <entryId> --vault <vault>' : 'Usage: passhold machine inbox dismiss <entryId>');
+  }
+  const hit = parsed.find((entry) => entry.id === targetId);
+  if (!hit) throw new CliError(`No pending inbox entry "${targetId}". Run: passhold machine inbox list`);
+
+  if (verb === 'dismiss') {
+    await dismissMachineInboxEntry(ctx.api, hit.machineId, hit.id);
+    say(`Dismissed "${hit.candidate.title}" from the agent inbox.`);
+    return 0;
+  }
+
+  if (verb === 'accept') {
+    const vaultQuery = flagText(flags, 'vault');
+    if (!vaultQuery) throw new CliError('Usage: passhold machine inbox accept <entryId> --vault <vault>');
+    const vaults = await openAgentVaults(ctx.api, trusted, ctx.productKey);
+    const vault = findVault(vaults, vaultQuery);
+    const value = agentApiKeyFromInbox(hit.candidate);
+    const saved = await putAgentItem(ctx.api, trusted, ctx.productKey, vault, null, value);
+    await dismissMachineInboxEntry(ctx.api, hit.machineId, hit.id);
+    account.saveAgentsState(
+      toStoredAgentsState(trusted, ctx.account.agents, {
+        known: mergeKnownAgentItems(ctx.account.agents?.known, [saved.item]),
+      }),
+    );
+    context.out(`${saved.item.item}\n`);
+    say(`Accepted "${value.title}" into agent vault "${vault.name}".`);
+    return 0;
+  }
+
+  throw new CliError(`Unknown inbox verb "${verb}". Use: list, accept, dismiss`);
+}
+
+/** Imports `.env` API keys directly into an agent vault (works on free and paid plans). */
+export async function importEnvToAgentVault(
+  context: Context,
+  envText: string,
+  vaultQuery: string,
+  deps: Omit<MachineCommandDeps, 'flags'>,
+): Promise<{ added: number; skipped: number; vaultName: string }> {
+  const { account, store, now } = deps;
+  const ctx = await openOwnerAgents(account, store, context.env, now);
+  const trusted = requireOpenAgents(ctx.opened);
+  const vaults = await openAgentVaults(ctx.api, trusted, ctx.productKey);
+  const vault = findVault(vaults, vaultQuery);
+  const synced = await syncAgentVault<AgentItemValue>(ctx.api, trusted, ctx.productKey, vault, {
+    known: knownAgentRecordOf(ctx.account.agents?.known),
+  });
+  let known = mergeKnownAgentItems(ctx.account.agents?.known, synced.items);
+
+  const existingKeys = new Set(
+    synced.items
+      .filter((entry) => !entry.deleted && entry.value?.kind === 'apikey')
+      .map((entry) => (entry.value as Extract<AgentItemValue, { kind: 'apikey' }>).key),
+  );
+  const entries = parseEnvEntries(envText);
+  if (!entries.length) throw new CliError('No API keys found in that .env file.');
+
+  let added = 0;
+  let skipped = 0;
+  for (const { env, value } of entries) {
+    if (existingKeys.has(value)) {
+      skipped += 1;
+      continue;
+    }
+    const draft = apiKeyFrom({ title: env, key: value, env: cleanEnvName(env) });
+    const itemVal: AgentItemValue = {
+      kind: 'apikey',
+      title: draft.title,
+      service: draft.service,
+      key: draft.key,
+      keyId: draft.keyId,
+      hosts: [...draft.hosts],
+      sendAs: draft.sendAs,
+      env: draft.env,
+      environment: draft.environment,
+      scopes: draft.scopes,
+      issuedAt: draft.issuedAt,
+      expiresAt: draft.expiresAt,
+      notes: draft.notes,
+    };
+    const saved = await putAgentItem(ctx.api, trusted, ctx.productKey, vault, null, itemVal);
+    known = mergeKnownAgentItems(known, [saved.item]);
+    existingKeys.add(value);
+    added += 1;
+  }
+  account.saveAgentsState(toStoredAgentsState(trusted, ctx.account.agents, { known }));
+  return { added, skipped, vaultName: vault.name };
 }
 
 async function runMachineVault(

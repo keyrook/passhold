@@ -317,6 +317,7 @@ import {
   type Prefs,
 } from '../lib/storage.js';
 import { CLIPBOARD_ALARM, clearClipboardLater, clearClipboardNow } from './clipboard.js';
+import { createNativeFillController } from './nativeFill.js';
 import { accountFailure } from '../lib/failure.js';
 import {
   agentsApproveUse,
@@ -329,6 +330,8 @@ import {
   agentsEditItem,
   agentsForget,
   agentsGrantItem,
+  agentsInboxAccept,
+  agentsInboxDismiss,
   agentsMoveToNewKey,
   agentsPendingCount,
   agentsPutItem,
@@ -526,8 +529,8 @@ async function setAgentsBadge(count: number): Promise<void> {
   }
 }
 
-function noteAgentsOverview<T extends { status: string; requests?: readonly unknown[] }>(overview: T): T {
-  void setAgentsBadge(overview.status === 'open' ? (overview.requests?.length ?? 0) : 0);
+function noteAgentsOverview<T extends { status: string; requests?: readonly unknown[]; inbox?: readonly unknown[] }>(overview: T): T {
+  void setAgentsBadge(overview.status === 'open' ? (overview.requests?.length ?? 0) + (overview.inbox?.length ?? 0) : 0);
   return overview;
 }
 
@@ -4362,6 +4365,14 @@ async function handle(request: Request, sender: chrome.runtime.MessageSender): P
       return withAgents((ctx) => agentsApproveUse(ctx, request.machineId, request.requestId, request.mode)).then(noteAgentsOverview);
     case 'agents/deny':
       return withAgents((ctx) => agentsDenyRequest(ctx, request.machineId, request.requestId)).then(noteAgentsOverview);
+    case 'agents/inboxAccept':
+      return withAgents((ctx) => agentsInboxAccept(ctx, request.machineId, request.entryId, request.vaultId)).then(noteAgentsOverview);
+    case 'agents/inboxDismiss':
+      return withAgents((ctx) => agentsInboxDismiss(ctx, request.machineId, request.entryId)).then(noteAgentsOverview);
+    case 'agents/browserFillStatus':
+      return nativeFill.status();
+    case 'agents/browserFillSet':
+      return nativeFill.setEnabled(request.enabled);
     case 'agents/remove':
       return withAgents(async (ctx) =>
         agentsRemoveMachine(ctx, request.machineId, request.password ? await ownerProofFromPassword(request.password) : null),
@@ -4456,7 +4467,11 @@ async function handleContent(request: ContentRequest, sender: chrome.runtime.Mes
 
   switch (request.type) {
     case 'content/hello': {
-      const hello: ContentHello = { ready: Boolean(await loadVaultFile()), ...(await loadPrefs()) };
+      const hello: ContentHello = {
+        ready: Boolean(await loadVaultFile()),
+        ...(await loadPrefs()),
+        agentBrowserFill: await nativeFill.isEnabled(),
+      };
       return hello;
     }
 
@@ -4743,6 +4758,27 @@ chrome.idle.onStateChanged.addListener((state) => {
     if (key && policy?.lockWithSystem !== false) await lock();
   })();
 });
+
+const nativeFill = createNativeFillController({
+  blockedOrigins: () => [KEYROOK_ORIGIN, VAULT_PAGE_ORIGIN, 'https://account.keyrook.com', 'https://vault.keyrook.com'],
+  inspectActiveTab: async () => {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab?.id === undefined) return null;
+    const frame = await topFrame(tab.id);
+    if (!frame) return null;
+    return { tabId: tab.id, url: frame.url, documentId: frame.documentId };
+  },
+  deliver: async (tabId, documentId, payload) => {
+    await deliverFill(tabId, { documentId }, {
+      type: 'ph/fill',
+      origin: payload.origin,
+      username: payload.username,
+      password: payload.password,
+      field: 'login',
+    });
+  },
+});
+void nativeFill.init().catch(() => undefined);
 
 // A closed tab's waiting sign-in and inline lists go with it.
 chrome.tabs.onRemoved.addListener((tabId) => {

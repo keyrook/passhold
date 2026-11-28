@@ -12,6 +12,7 @@ import {
   createAgentVault,
   createMachineToken,
   denyMachineUse,
+  dismissMachineInboxEntry,
   finishMachineRekey,
   forgetMachines,
   giveMachineItems,
@@ -25,6 +26,7 @@ import {
   readArchivedAgentVault,
   readMachineAudit,
   readMachineCalls,
+  readMachineInbox,
   removeMachine,
   renewMachine,
   resumeMachine,
@@ -50,6 +52,7 @@ import {
   type TrustedAgents,
 } from '@keyrook/account';
 import {
+  agentApiKeyFromInbox,
   cleanHosts,
   describeAgentItem,
   exposedKeysFor,
@@ -58,6 +61,7 @@ import {
   listAgentMachines,
   mergeKnownAgentItems,
   openOrRecoverAgents,
+  parseAgentInboxApiKey,
   refreshEditedAgentItemGrants,
   serviceOfKey,
   toStoredAgentsState,
@@ -76,6 +80,7 @@ import type {
   AgentsAuditView,
   AgentsOverview,
   AgentVaultSummary,
+  PendingAgentInboxView,
   PendingAgentRequestView,
 } from '../lib/messaging.js';
 
@@ -193,6 +198,26 @@ async function buildOverview(ctx: AgentWorkerContext, trusted: TrustedAgents, no
     };
   });
 
+  const inboxRead = await readMachineInbox(ctx.api, trusted, ctx.productKey).catch(() => ({ entries: [], unreadable: 0 }));
+  const inbox: PendingAgentInboxView[] = [];
+  for (const entry of inboxRead.entries) {
+    const parsed = parseAgentInboxApiKey(entry.body);
+    if (!parsed) continue;
+    inbox.push({
+      id: entry.id,
+      machineId: entry.machineId,
+      machineName: entry.machineName,
+      title: parsed.title,
+      service: parsed.service,
+      hosts: parsed.hosts,
+      env: parsed.env,
+      environment: parsed.environment,
+      reason: parsed.reason,
+      createdAt: entry.createdAt,
+      expiresAt: entry.expiresAt,
+    });
+  }
+
   const exposed: ExposedKeyEntry[] = await exposedKeysFor(trusted, allItems);
   const pendingRekey = machines.reduce((sum, m) => sum + m.keysWaiting, 0);
 
@@ -201,15 +226,16 @@ async function buildOverview(ctx: AgentWorkerContext, trusted: TrustedAgents, no
     vaults: vaultSummaries,
     machines,
     requests,
+    inbox,
     exposed,
     pendingRekey,
   };
 }
 
 /**
- * Lightweight count of live pending approval requests for the popup banner and
- * toolbar badge: never throws when agents are off or not offered, and avoids
- * syncing every agent vault just to check whether requests are waiting.
+ * Lightweight count of live pending approval requests and inbox items for the
+ * popup banner and toolbar badge: never throws when agents are off or not
+ * offered, and avoids syncing every agent vault just to check whether work is waiting.
  */
 export async function agentsPendingCount(ctx: AgentWorkerContext, now = Date.now()): Promise<{ count: number }> {
   const opened = await openOrRecoverAgents(ctx.api, ctx.productKey, ctx.stored, { previous: ctx.previous, autoMove: false });
@@ -220,7 +246,9 @@ export async function agentsPendingCount(ctx: AgentWorkerContext, now = Date.now
     await ctx.save(nextStored);
   }
   const reviewed = await reviewMachineRequests(ctx.api, trusted, ctx.productKey, now);
-  return { count: reviewed.requests.length };
+  const inbox = await readMachineInbox(ctx.api, trusted, ctx.productKey).catch(() => ({ entries: [], unreadable: 0 }));
+  const validInbox = inbox.entries.filter((entry) => parseAgentInboxApiKey(entry.body) !== null).length;
+  return { count: reviewed.requests.length + validInbox };
 }
 
 async function openTrusted(ctx: AgentWorkerContext): Promise<TrustedAgents> {
@@ -480,6 +508,33 @@ export async function agentsDenyRequest(ctx: AgentWorkerContext, machineId: stri
   const next = await openAgents(ctx.api, ctx.productKey, trusted.checkpoint);
   await ctx.save(toStoredAgentsState(next, ctx.stored));
   return buildOverview(ctx, next);
+}
+
+export async function agentsInboxAccept(
+  ctx: AgentWorkerContext,
+  machineId: string,
+  entryId: string,
+  vaultId: string,
+): Promise<AgentsOverview> {
+  const trusted = await openTrusted(ctx);
+  const vaults = await openAgentVaults(ctx.api, trusted, ctx.productKey);
+  const vault = vaults.find((v) => v.id === vaultId);
+  if (!vault) fail('error.agentVaultGone');
+  const inbox = await readMachineInbox(ctx.api, trusted, ctx.productKey);
+  const entry = inbox.entries.find((item) => item.machineId === machineId && item.id === entryId);
+  const parsed = entry ? parseAgentInboxApiKey(entry.body) : null;
+  if (!entry || !parsed) fail('error.agentRequestEnded');
+  const saved = await putAgentItem(ctx.api, trusted, ctx.productKey, vault, null, agentApiKeyFromInbox(parsed));
+  await dismissMachineInboxEntry(ctx.api, machineId, entryId);
+  const known = mergeKnownAgentItems(ctx.stored?.known, [saved.item]);
+  await ctx.save(toStoredAgentsState(trusted, ctx.stored, { known }));
+  return buildOverview(ctx, trusted);
+}
+
+export async function agentsInboxDismiss(ctx: AgentWorkerContext, machineId: string, entryId: string): Promise<AgentsOverview> {
+  const trusted = await openTrusted(ctx);
+  await dismissMachineInboxEntry(ctx.api, machineId, entryId);
+  return buildOverview(ctx, trusted);
 }
 
 export async function agentsRemoveMachine(

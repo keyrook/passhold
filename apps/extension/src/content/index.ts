@@ -184,11 +184,20 @@ const button = new FieldButton((field) => void openMenu(field));
  * only whether the list appears — filling from it still takes a click in
  * Passhold's own frame.
  */
+/**
+ * Automation-driven browsers (`navigator.webdriver`) with Browser Fill for
+ * agents enabled suppress unsolicited personal-vault inline suggestions and
+ * save prompts so automated agent sessions never touch personal credentials.
+ * Explicit `ph/fill` messages from `fill_login` still work normally.
+ */
+const AUTOMATED = Boolean(navigator.webdriver);
+const agentQuiet = (current: ContentHello | null): boolean => AUTOMATED && Boolean(current?.agentBrowserFill);
+
 let tabbedAt = 0;
 
 function suggest(field: HTMLInputElement): void {
   void prefs().then((current) => {
-    if (!current?.ready || !current.autoSuggest) return;
+    if (!current?.ready || !current.autoSuggest || agentQuiet(current)) return;
     if (field.matches(':focus') && !field.value && kindOf(field)) void openMenu(field, true);
   });
 }
@@ -201,7 +210,7 @@ document.addEventListener(
     if (menu && menu.field !== target) closeMenu();
     const tabbed = Date.now() - tabbedAt < 500;
     void prefs().then((current) => {
-      if (!current?.ready) return;
+      if (!current?.ready || agentQuiet(current)) return;
       // Still the field in focus once the answer is back.
       if (!target.matches(':focus')) return;
       const kind = kindOf(target);
@@ -307,7 +316,7 @@ function capture(from: HTMLInputElement | HTMLFormElement): void {
   if (key === lastOffered) return;
   lastOffered = key;
   void prefs().then(async (current) => {
-    if (!current?.ready || !current.offerToSave) return;
+    if (!current?.ready || !current.offerToSave || agentQuiet(current)) return;
     await ask({ type: 'content/offerSave', username: user, password, ...(old ? { current: old.value } : {}) });
     // A form with a new password in it — one that changes it, or makes an
     // account — may stay and empty itself once done. A sign-in form that
@@ -383,7 +392,7 @@ function captureFirstStep(scope: ParentNode): void {
   if (!username || username === lastFirstStep) return;
   lastFirstStep = username;
   void prefs().then((current) => {
-    if (current?.ready && current.offerToSave) void ask({ type: 'content/firstStep', username });
+    if (current?.ready && current.offerToSave && !agentQuiet(current)) void ask({ type: 'content/firstStep', username });
   });
 }
 
@@ -396,7 +405,7 @@ let lastOfferedCheckout = '';
  * with it. The service worker says no for a vault where offering is off.
  */
 function captureCheckout(scope: ParentNode): void {
-  if (hello && (!hello.value.ready || !hello.value.offerToSaveCards)) return;
+  if (hello && (!hello.value.ready || !hello.value.offerToSaveCards || agentQuiet(hello.value))) return;
   const { card, address } = sentIn(scope);
   if (!card && !address) return;
   const key = [card?.number, card?.expMonth, card?.expYear, address?.street].join('\u0000');
@@ -492,6 +501,7 @@ function showPrompt(token: string): void {
 }
 
 async function checkPrompt(): Promise<void> {
+  if (agentQuiet(await prefs())) return;
   const waiting = await ask({ type: 'content/checkPrompt', signInForm: passwordsIn(document).length > 0 });
   if (waiting) showPrompt(waiting.token);
 }

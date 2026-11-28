@@ -11,7 +11,7 @@ describe('the manifest', () => {
   it('asks for no permission beyond the ones it needs', () => {
     expect(manifest.permissions.sort()).toEqual(['alarms', 'clipboardWrite', 'idle', 'offscreen', 'storage']);
     expect(manifest.host_permissions).toBeUndefined();
-    expect(manifest.optional_permissions).toBeUndefined();
+    expect(manifest.optional_permissions).toEqual(['nativeMessaging']);
   });
 
   it('asks for the Keyrook account’s page only when a passkey is chosen, and for no other site', () => {

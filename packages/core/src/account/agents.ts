@@ -29,7 +29,8 @@ import {
   type ProductKey,
   type TrustedAgents,
 } from '@keyrook/account';
-import { apiService, cleanEnvName, cleanHosts, cleanSendAs } from '../apikey.js';
+import { apiService, cleanEnvName, cleanHosts, cleanSendAs, serviceOfKey } from '../apikey.js';
+import { apiKeyFrom } from '../import/apikeys.js';
 import { RESERVED_REQUEST_HEADERS, sha256Base64 } from '../agents/guard.js';
 import type { ApiKeyItem, CustomField, LoginItem, StoredAgentsState, WalletItem } from '../vault/model.js';
 
@@ -451,6 +452,138 @@ export async function openOrRecoverAgents(
 /** Re-export helper to construct an `ApiKeyItem` draft compatible with agent items. */
 export function isAgentApiKeyValue(value: unknown): value is AgentApiKeyValue {
   return typeof value === 'object' && value !== null && (value as Partial<AgentApiKeyValue>).kind === 'apikey' && typeof (value as Partial<AgentApiKeyValue>).key === 'string';
+}
+
+/** Validated API key payload delivered by a machine via `save_api_key` into the owner's inbox. */
+export interface AgentInboxApiKey {
+  kind: 'apikey';
+  title: string;
+  service: string;
+  key: string;
+  keyId: string;
+  hosts: string[];
+  sendAs: string;
+  env: string;
+  environment: string;
+  scopes: string;
+  notes: string;
+  reason: string;
+}
+
+const trimMax = (value: unknown, max: number): string => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+
+/**
+ * Validates and normalizes an opened machine inbox entry body into a typed
+ * API key candidate, auto-filling known service defaults and dropping any host
+ * that fails `isMachineDelivery` (such as overly broad wildcard suffixes).
+ */
+export function parseAgentInboxApiKey(body: Record<string, unknown>): AgentInboxApiKey | null {
+  if (body.kind !== undefined && body.kind !== 'apikey') return null;
+  const key = typeof body.key === 'string' ? body.key.trim() : '';
+  if (!key || key.length > 8192) return null;
+  const rawTitle = trimMax(body.title, 200);
+  const rawService = trimMax(body.service, 100);
+  const rawKeyId = trimMax(body.keyId, 200);
+  const rawHosts = Array.isArray(body.hosts) ? body.hosts.filter((h): h is string => typeof h === 'string') : typeof body.hosts === 'string' ? body.hosts : [];
+  const rawEnv = trimMax(body.env, 128);
+  const rawSendAs = trimMax(body.sendAs, 128);
+  const draft = apiKeyFrom({
+    title: rawTitle || rawEnv || 'API key',
+    service: rawService,
+    key,
+    keyId: rawKeyId,
+    hosts: cleanHosts(rawHosts),
+    ...(rawSendAs ? { sendAs: rawSendAs } : {}),
+    ...(rawEnv ? { env: cleanEnvName(rawEnv) } : {}),
+    environment: trimMax(body.environment, 100),
+    scopes: trimMax(body.scopes, 500),
+    notes: trimMax(body.notes, 4000),
+  });
+  const detectedService = draft.service || serviceOfKey(key, rawKeyId) || '';
+  const safeHosts = cleanHosts(draft.hosts).filter((h) => isMachineDelivery({ hosts: [h], sendAs: 'bearer', keyId: null, env: null }));
+  const keyId = draft.keyId.trim();
+  const sendAs = normalizeMachineSendAs(draft.sendAs || 'bearer', keyId || null);
+  const env = cleanEnvName(draft.env);
+  return {
+    kind: 'apikey',
+    title: draft.title.trim() || 'API key',
+    service: detectedService,
+    key,
+    keyId,
+    hosts: safeHosts,
+    sendAs,
+    env: env && VALID_ENV_VAR.test(env) ? env : '',
+    environment: draft.environment.trim(),
+    scopes: draft.scopes.trim(),
+    notes: draft.notes.trim(),
+    reason: trimMax(body.reason, 500),
+  };
+}
+
+/** Converts a reviewed inbox API key payload into an agent vault item ready for `putAgentItem`. */
+export function agentApiKeyFromInbox(entry: AgentInboxApiKey): AgentApiKeyValue {
+  return {
+    kind: 'apikey',
+    title: entry.title,
+    service: entry.service,
+    key: entry.key,
+    keyId: entry.keyId,
+    hosts: [...entry.hosts],
+    sendAs: entry.sendAs,
+    env: entry.env,
+    environment: entry.environment,
+    scopes: entry.scopes,
+    issuedAt: null,
+    expiresAt: null,
+    notes: entry.notes,
+  };
+}
+
+export type McpClientKind = 'standard' | 'cursor' | 'vscode' | 'raw';
+
+/**
+ * Generates a ready-to-paste MCP client configuration snippet for `passhold mcp`.
+ * Shared between the CLI (`passhold machine config`) and the extension UI.
+ */
+export function buildMcpConfigSnippet(
+  client: McpClientKind = 'standard',
+  options: { command?: string; apiUrl?: string } = {},
+): string {
+  const command = options.command?.trim() || 'passhold';
+  const apiUrl = options.apiUrl?.trim();
+  const env = apiUrl && apiUrl !== 'https://api.keyrook.com' ? { PASSHOLD_API: apiUrl } : undefined;
+  if (client === 'raw') {
+    return env ? `PASSHOLD_API=${env.PASSHOLD_API} ${command} mcp\n` : `${command} mcp\n`;
+  }
+  if (client === 'vscode') {
+    return `${JSON.stringify(
+      {
+        servers: {
+          passhold: {
+            type: 'stdio',
+            command,
+            args: ['mcp'],
+            ...(env ? { env } : {}),
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+  }
+  return `${JSON.stringify(
+    {
+      mcpServers: {
+        passhold: {
+          command,
+          args: ['mcp'],
+          ...(env ? { env } : {}),
+        },
+      },
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 function sameItemDescription(

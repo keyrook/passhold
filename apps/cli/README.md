@@ -26,8 +26,8 @@ leaves out Alpine; Windows 10 or later on x64), check it against
 
 ```sh
 shasum -a 256 -c --ignore-missing SHA256SUMS  # sha256sum on Linux
-tar -xzf passhold-0.3.0-macos-arm64.tar.gz
-sudo mv passhold-0.3.0-macos-arm64/passhold /usr/local/bin/
+tar -xzf passhold-0.4.0-macos-arm64.tar.gz
+sudo mv passhold-0.4.0-macos-arm64/passhold /usr/local/bin/
 ```
 
 The Mac programs are not notarised by Apple yet: one downloaded in a browser
@@ -134,8 +134,12 @@ passhold machine invite                              # prints a phi_... invitati
 passhold machine enroll <phi_...>                    # on the machine itself
 passhold machine confirm <invitation-id> --name "Build box"
 passhold machine grant "Build box" Dev/"Stripe test" --uses request --approval each
+passhold machine config --client standard            # ready-to-paste MCP client config
+passhold machine inbox list                          # review keys sent via save_api_key
+passhold import --env .env --agent-vault Dev         # bulk-import API keys from a .env file
 passhold approve                                     # answer a pending use request
 passhold mcp                                         # stdio MCP server on an enrolled machine
+passhold mcp --install-browser chrome                # install local native bridge for fill_login
 ```
 
 `passhold machine stop-all` pauses every machine immediately; `passhold machine

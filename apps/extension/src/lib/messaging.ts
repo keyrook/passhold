@@ -551,6 +551,10 @@ export type Request =
   | { type: 'agents/withdraw'; machineId: string; vaultId: string; itemId: string }
   | { type: 'agents/approveUse'; machineId: string; requestId: string; mode: 'once' | 'session' }
   | { type: 'agents/deny'; machineId: string; requestId: string }
+  | { type: 'agents/inboxAccept'; machineId: string; entryId: string; vaultId: string }
+  | { type: 'agents/inboxDismiss'; machineId: string; entryId: string }
+  | { type: 'agents/browserFillStatus' }
+  | { type: 'agents/browserFillSet'; enabled: boolean }
   | { type: 'agents/remove'; machineId: string; password?: string }
   | { type: 'agents/stopAll'; password: string }
   | { type: 'agents/resume'; machineId: string; password: string }
@@ -612,6 +616,20 @@ export type PendingAgentRequestView =
       expiresAt: number;
     };
 
+export interface PendingAgentInboxView {
+  id: string;
+  machineId: string;
+  machineName: string;
+  title: string;
+  service: string;
+  hosts: string[];
+  env: string;
+  environment: string;
+  reason: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
 export type AgentsOverview =
   | { status: 'not-offered' }
   | { status: 'off' }
@@ -621,9 +639,16 @@ export type AgentsOverview =
       vaults: AgentVaultSummary[];
       machines: AgentMachineSummary[];
       requests: PendingAgentRequestView[];
+      inbox: PendingAgentInboxView[];
       exposed: ExposedKeyEntry[];
       pendingRekey: number;
     };
+
+export interface AgentBrowserFillStatus {
+  enabled: boolean;
+  permission: boolean;
+  connected: boolean;
+}
 
 export interface AgentsAuditView {
   entries: { machineId: string; machineName: string; stream: string; sequence: number; at: number; entry: Record<string, unknown> }[];
@@ -768,6 +793,8 @@ export type ResponseFor<R extends Request> = R extends {
                                       | 'agents/withdraw'
                                       | 'agents/approveUse'
                                       | 'agents/deny'
+                                      | 'agents/inboxAccept'
+                                      | 'agents/inboxDismiss'
                                       | 'agents/remove'
                                       | 'agents/stopAll'
                                       | 'agents/resume'
@@ -794,7 +821,9 @@ export type ResponseFor<R extends Request> = R extends {
                                               ? AgentsAuditView
                                               : R extends { type: 'agents/pending' }
                                                 ? { count: number }
-                                                : void;
+                                                : R extends { type: 'agents/browserFillStatus' | 'agents/browserFillSet' }
+                                                  ? AgentBrowserFillStatus
+                                                  : void;
 
 // --- the content script's side ------------------------------------------------
 
@@ -876,6 +905,8 @@ export interface ContentHello {
   offerToSaveCards: boolean;
   autoSuggest: boolean;
   passkeys: boolean;
+  /** True when the owner enabled `fill_login` browser bridge for agents. */
+  agentBrowserFill?: boolean;
 }
 
 /** A field's place in its own frame. */

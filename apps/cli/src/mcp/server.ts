@@ -78,6 +78,20 @@ export const MCP_TOOLS = [
     },
   },
   {
+    name: 'fill_login',
+    description:
+      'Fill a granted website login into the active browser tab via the Passhold extension native bridge. Verifies the target host against the grant and never returns the password to the agent.',
+    inputSchema: {
+      type: 'object',
+      required: ['item', 'url'],
+      properties: {
+        item: { type: 'string', description: 'Granted login item id (`vault:item`), reference, or title.' },
+        url: { type: 'string', description: 'Target website URL (must match the login’s allowed hosts and active browser tab).' },
+        reason: { type: 'string', description: 'Short explanation shown to the human owner if approval is required.' },
+      },
+    },
+  },
+  {
     name: 'reveal',
     description: 'Request one-time human approval to reveal a single secret field value.',
     inputSchema: {
@@ -99,6 +113,35 @@ export const MCP_TOOLS = [
       properties: {
         what: { type: 'string' },
         reason: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'save_api_key',
+    description:
+      'Seal a newly created API key directly into the human owner’s Passhold inbox for review. Prefer passing `from_command` (argv array, shell: false) so the secret goes straight from command stdout into Passhold without entering model context.',
+    inputSchema: {
+      type: 'object',
+      required: ['title'],
+      properties: {
+        title: { type: 'string', description: 'Short display name for the API key (e.g. "Stripe sandbox").' },
+        key: { type: 'string', description: 'Direct secret key value (omit when using from_command).' },
+        from_command: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          description: 'Command argv executed directly (shell: false) whose trimmed stdout is sealed as the key without returning it.',
+        },
+        cwd: { type: 'string', description: 'Optional working directory for from_command.' },
+        service: { type: 'string' },
+        keyId: { type: 'string' },
+        hosts: { type: 'array', items: { type: 'string' } },
+        sendAs: { type: 'string', description: 'bearer, basic, header:<name>, or query:<name>.' },
+        env: { type: 'string', description: 'Default environment variable name (e.g. STRIPE_API_KEY).' },
+        environment: { type: 'string', description: 'e.g. production, sandbox, development.' },
+        scopes: { type: 'string' },
+        notes: { type: 'string' },
+        reason: { type: 'string', description: 'Short context shown to the owner in Passhold inbox.' },
       },
     },
   },
@@ -164,6 +207,13 @@ export async function handleMcpMessage(runtime: MachineRuntime, msg: JsonRpcRequ
               ...(typeof args.reason === 'string' ? { reason: args.reason } : {}),
             });
             break;
+          case 'fill_login':
+            payload = await runtime.fillLogin({
+              item: String(args.item ?? ''),
+              url: String(args.url ?? ''),
+              ...(typeof args.reason === 'string' ? { reason: args.reason } : {}),
+            });
+            break;
           case 'reveal':
             payload = await runtime.reveal({
               item: String(args.item ?? ''),
@@ -175,6 +225,23 @@ export async function handleMcpMessage(runtime: MachineRuntime, msg: JsonRpcRequ
             payload = await runtime.requestAccess({
               what: String(args.what ?? ''),
               reason: String(args.reason ?? ''),
+            });
+            break;
+          case 'save_api_key':
+            payload = await runtime.saveApiKey({
+              title: String(args.title ?? ''),
+              ...(typeof args.key === 'string' ? { key: args.key } : {}),
+              ...(Array.isArray(args.from_command) ? { from_command: args.from_command.map(String) } : {}),
+              ...(typeof args.cwd === 'string' ? { cwd: args.cwd } : {}),
+              ...(typeof args.service === 'string' ? { service: args.service } : {}),
+              ...(typeof args.keyId === 'string' ? { keyId: args.keyId } : {}),
+              ...(Array.isArray(args.hosts) ? { hosts: args.hosts.map(String) } : {}),
+              ...(typeof args.sendAs === 'string' ? { sendAs: args.sendAs } : {}),
+              ...(typeof args.env === 'string' ? { env: args.env } : {}),
+              ...(typeof args.environment === 'string' ? { environment: args.environment } : {}),
+              ...(typeof args.scopes === 'string' ? { scopes: args.scopes } : {}),
+              ...(typeof args.notes === 'string' ? { notes: args.notes } : {}),
+              ...(typeof args.reason === 'string' ? { reason: args.reason } : {}),
             });
             break;
           case 'status':

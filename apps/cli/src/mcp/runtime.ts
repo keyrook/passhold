@@ -13,6 +13,7 @@ import {
   readMachineStatus,
   sealMachineLogBatch,
   sendMachineAsk,
+  sendMachineInboxEntry,
   sendMachineLogBatch,
   SyncHttpError,
   type MachineAsk,
@@ -23,14 +24,20 @@ import {
   type MachineRelease,
 } from '@keyrook/account';
 import {
+  apiKeyFrom,
   boundsAllowCommand,
   boundsAllowRequest,
   buildHttpOperation,
   buildRunOperation,
+  cleanEnvName,
+  cleanHosts,
   extractAgentField,
   hostAllowed,
   newId,
+  normalizeMachineSendAs,
+  normalizeRequestUrl,
   operationsEqual,
+  parseAgentInboxApiKey,
   primaryAgentSecret,
   type AgentItemValue,
   type SecretEntry,
@@ -39,6 +46,9 @@ import { ensureMachineConfirmed, pullMachineIntoCache, type LoadedMachine } from
 import { importVerifyKey, type CachedMachineItem, type CachedMachineState, type Store } from '../store.js';
 import { executeSafeCommand, type CommandExecutor, type SafeExecResult } from './exec.js';
 import { deliveryHeaderName, executeDirectHttp, type DirectHttpResponse, type HttpTransport } from './http.js';
+import { sendNativeFill, type NativeFillRequest, type NativeFillResult } from './native-host.js';
+
+export type FillBridge = (request: NativeFillRequest) => Promise<NativeFillResult>;
 
 export interface MachineRuntimeOptions {
   client: MachineClient;
@@ -53,6 +63,7 @@ export interface MachineRuntimeOptions {
   pollIntervalMs?: number;
   httpTransport?: HttpTransport;
   commandExecutor?: CommandExecutor;
+  fillBridge?: FillBridge;
   /** Allow plain `http:` to loopback addresses (default true, useful for local servers and tests). */
   allowInsecureLoopback?: boolean;
 }
@@ -81,6 +92,7 @@ export class MachineRuntime {
   private readonly pollIntervalMs: number;
   private readonly httpTransport: HttpTransport;
   private readonly commandExecutor: CommandExecutor;
+  private readonly fillBridge: FillBridge;
   private readonly allowInsecureLoopback: boolean;
 
   private cache: CachedMachineState | null = null;
@@ -102,6 +114,7 @@ export class MachineRuntime {
     this.pollIntervalMs = options.pollIntervalMs ?? 1_500;
     this.httpTransport = options.httpTransport ?? executeDirectHttp;
     this.commandExecutor = options.commandExecutor ?? executeSafeCommand;
+    this.fillBridge = options.fillBridge ?? ((req) => sendNativeFill(this.store.home, req));
     this.allowInsecureLoopback = options.allowInsecureLoopback ?? true;
     this.logStream = newId();
   }
@@ -562,6 +575,53 @@ export class MachineRuntime {
     return result;
   }
 
+  /**
+   * `fill_login`: sends a granted website login over the local native bridge
+   * to the Passhold browser extension to fill the active tab for `url`.
+   * Passwords NEVER return to the caller and never enter model context.
+   */
+  async fillLogin(input: {
+    item: string;
+    url: string;
+    reason?: string;
+  }): Promise<{ status: 'filled'; url: string; title: string }> {
+    const cache = await this.sync();
+    const entry = this.findItem(cache, input.item);
+    if (!entry.grant.uses.includes('fill')) {
+      throw new Error(`Item "${entry.listing.title || entry.item}" is not granted for fill_login.`);
+    }
+    const normalized = normalizeRequestUrl(input.url, { allowInsecureLoopback: this.allowInsecureLoopback });
+    if (!hostAllowed(normalized, entry.delivery.hosts)) {
+      this.recordLog({ tool: 'fill_login', item: `${entry.vault}:${entry.item}`, host: normalized.host, outcome: 'blocked_host' });
+      throw new Error(`Host "${normalized.host}" is not in the allowed hosts for "${entry.listing.title || entry.item}".`);
+    }
+    const targetUrl = `${normalized.protocol}//${normalized.host}${normalized.pathname}`;
+    const operation: MachineOperation = { use: 'fill', url: targetUrl };
+    const obtained = await this.obtainSecretForUse(cache, entry, 'password', operation, input.reason?.trim() || '');
+    const username =
+      (entry.value?.kind === 'login' ? entry.value.username : '') ||
+      entry.delivery.keyId ||
+      '';
+    const title = entry.listing.title || entry.item;
+
+    await this.fillBridge({
+      url: targetUrl,
+      username,
+      password: obtained.value,
+      title,
+    });
+
+    this.recordLog({
+      tool: 'fill_login',
+      item: `${entry.vault}:${entry.item}`,
+      host: normalized.host,
+      path: normalized.pathname,
+      outcome: 'filled',
+      mode: obtained.mode,
+    });
+    return { status: 'filled', url: targetUrl, title };
+  }
+
   /** `reveal`: requests explicit one-time human approval to disclose a single field value. */
   async reveal(input: { item: string; field?: string; reason: string }): Promise<{ field: string; value: string }> {
     const cache = await this.sync();
@@ -588,6 +648,125 @@ export class MachineRuntime {
     }
     this.recordLog({ tool: 'request_access', what: input.what, outcome: 'deny' });
     return { granted: false };
+  }
+
+  /**
+   * `save_api_key`: seals a newly created API key directly to the owner's
+   * Passhold inbox for review. When `from_command` is supplied, executes the
+   * command (`shell: false`), captures its trimmed stdout directly into the
+   * sealed inbox entry, and NEVER returns the secret value to the caller.
+   */
+  async saveApiKey(input: {
+    title: string;
+    key?: string;
+    from_command?: string[];
+    cwd?: string;
+    service?: string;
+    keyId?: string;
+    hosts?: string[];
+    sendAs?: string;
+    env?: string;
+    environment?: string;
+    scopes?: string;
+    notes?: string;
+    reason?: string;
+  }): Promise<{
+    status: 'saved_to_inbox';
+    entryId: string;
+    title: string;
+    service: string;
+    hosts: string[];
+    expiresAt: number;
+    message: string;
+  }> {
+    const t = this.now();
+    this.loaded = await ensureMachineConfirmed(this.client, this.store, this.loaded, t);
+    const title = input.title.trim();
+    if (!title) throw new Error('save_api_key requires a non-empty title.');
+
+    const hasDirectKey = typeof input.key === 'string' && input.key.trim().length > 0;
+    const hasCommand = Array.isArray(input.from_command) && input.from_command.length > 0;
+    if (hasDirectKey === hasCommand) {
+      throw new Error('Provide either "key" or "from_command" (not both).');
+    }
+
+    let capturedKey: string;
+    if (hasCommand) {
+      const argv = input.from_command!.map(String);
+      const cwd = input.cwd?.trim() || process.cwd();
+      const execResult = await this.commandExecutor({
+        argv,
+        cwd,
+        baseEnv: this.env,
+        injectedEnv: {},
+        timeoutSeconds: 60,
+        redact: [],
+      });
+      if (execResult.timedOut) {
+        throw new Error('Command in from_command timed out before producing an API key.');
+      }
+      if (execResult.exitCode !== 0) {
+        throw new Error(`Command in from_command failed with exit code ${execResult.exitCode}.`);
+      }
+      capturedKey = execResult.stdout.trim();
+      if (!capturedKey) {
+        throw new Error('Command in from_command produced empty stdout.');
+      }
+    } else {
+      capturedKey = input.key!.trim();
+    }
+
+    if (capturedKey.length > 8192) {
+      throw new Error('API key exceeds maximum allowed length (8192 characters).');
+    }
+
+    const draft = apiKeyFrom({
+      title,
+      key: capturedKey,
+      ...(input.service ? { service: input.service } : {}),
+      ...(input.keyId ? { keyId: input.keyId } : {}),
+      ...(input.hosts ? { hosts: cleanHosts(input.hosts) } : {}),
+      ...(input.sendAs ? { sendAs: normalizeMachineSendAs(input.sendAs, input.keyId ?? null) } : {}),
+      ...(input.env ? { env: cleanEnvName(input.env) } : {}),
+      ...(input.environment ? { environment: input.environment } : {}),
+      ...(input.scopes ? { scopes: input.scopes } : {}),
+      ...(input.notes ? { notes: input.notes } : {}),
+    });
+
+    const normalized = parseAgentInboxApiKey({
+      kind: 'apikey',
+      title: draft.title,
+      service: draft.service,
+      key: draft.key,
+      keyId: draft.keyId,
+      hosts: draft.hosts,
+      sendAs: draft.sendAs,
+      env: draft.env,
+      environment: draft.environment,
+      scopes: draft.scopes,
+      notes: draft.notes,
+      reason: input.reason ?? '',
+    });
+    if (!normalized) throw new Error('Could not build a valid API key inbox entry.');
+
+    const receipt = await sendMachineInboxEntry(this.client, this.loaded.identity, normalized as unknown as Record<string, unknown>);
+    this.recordLog({
+      tool: 'save_api_key',
+      entryId: receipt.id,
+      title: normalized.title,
+      service: normalized.service,
+      hosts: normalized.hosts,
+      via: hasCommand ? 'command' : 'direct',
+    });
+    return {
+      status: 'saved_to_inbox',
+      entryId: receipt.id,
+      title: normalized.title,
+      service: normalized.service,
+      hosts: normalized.hosts,
+      expiresAt: receipt.expiresAt,
+      message: 'Saved to your Passhold inbox. Accept it in Passhold to store it in an agent vault.',
+    };
   }
 
   /** `status`: returns verified machine status and cached item count. */

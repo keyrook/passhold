@@ -2713,6 +2713,29 @@ export interface MachineRequestsPage {
   requests: MachineRequestView[];
   next: { machine: string; request: string } | null;
 }
+/** `POST /machine/inbox`: a sealed entry a machine hands the person to review and keep, under an id the machine made. */
+export interface MachineInboxSubmission {
+  id: string;
+  box: MachineSealed;
+}
+/** What `POST /machine/inbox` answers once the entry is held for the person. */
+export interface MachineInboxReceipt {
+  id: string;
+  createdAt: number;
+  expiresAt: number;
+}
+/** One inbox entry waiting for the person, as Passhold reads it to open and review. */
+export interface MachineInboxView {
+  machineId: string;
+  id: string;
+  box: MachineSealed;
+  createdAt: number;
+  expiresAt: number;
+}
+/** `GET /agents/inbox`: pending inbox entries from the account's machines, newest first. */
+export interface MachineInboxPage {
+  entries: MachineInboxView[];
+}
 /** `POST /agents/requests/:id/decision`: what the device answered, and its own record of it under Passhold's key. */
 export interface MachineDecisionSubmission {
   machineId: string;

@@ -184,6 +184,7 @@ import type {
   AgentLogPage,
   MachineDecided,
   MachineDecisionSubmission,
+  MachineInboxPage,
   MachineRequestsPage,
   AgentMoveDecisionsPage,
   AgentMoveStepRequest,
@@ -1205,6 +1206,14 @@ export class HttpSyncAdapter implements SyncAdapter {
   async machineRequests(after: { machine: string; request: string } | null = null): Promise<MachineRequestsPage> {
     const page = after ? `?machine=${encodeURIComponent(after.machine)}&after=${encodeURIComponent(after.request)}` : '';
     return this.authed<MachineRequestsPage>(`/agents/requests${page}`, { method: 'GET' });
+  }
+  /** Sealed entries machines handed the person to review and keep. */
+  async agentInbox(): Promise<MachineInboxPage> {
+    return this.authed<MachineInboxPage>('/agents/inbox', { method: 'GET' });
+  }
+  /** Removes one inbox entry once accepted or dismissed. */
+  async deleteAgentInbox(machineId: string, entryId: string): Promise<void> {
+    await this.authed<unknown>(`/agents/inbox/${encodeURIComponent(machineId)}/${encodeURIComponent(entryId)}`, { method: 'DELETE' });
   }
   /** This device's answer to one request, and its own record of it. */
   async decideMachineRequest(requestId: string, body: MachineDecisionSubmission): Promise<MachineDecided> {

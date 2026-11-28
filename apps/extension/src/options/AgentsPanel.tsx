@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { MachineApproval, MachineCandidate } from '@keyrook/account';
-import { cleanHosts, serviceOfKey } from '@passhold/core';
+import { buildMcpConfigSnippet, cleanHosts, serviceOfKey, type McpClientKind } from '@passhold/core';
 import { useT } from '../i18n/react.js';
-import { onVaultChanged, send, type AgentsAuditView, type AgentsOverview } from '../lib/messaging.js';
+import { onVaultChanged, send, type AgentBrowserFillStatus, type AgentsAuditView, type AgentsOverview } from '../lib/messaging.js';
 import { useAction } from '../ui/hooks.js';
 import { Button, Callout, Field } from '../ui/primitives.js';
 import { Choice, PageHeader, Row, Section, StateDot } from './Section.js';
@@ -49,6 +49,12 @@ export function AgentsPanel({ onPendingChange }: { onPendingChange?: (count: num
     hosts: string;
   } | null>(null);
   const [audit, setAudit] = useState<AgentsAuditView | null>(null);
+  const [inboxVaults, setInboxVaults] = useState<Record<string, string>>({});
+  const [showMcpConfig, setShowMcpConfig] = useState(false);
+  const [mcpClient, setMcpClient] = useState<McpClientKind>('standard');
+  const [mcpCopied, setMcpCopied] = useState(false);
+  const [browserFill, setBrowserFill] = useState<AgentBrowserFillStatus | null>(null);
+  const [grantAllowFill, setGrantAllowFill] = useState(false);
 
   const load = () =>
     send({ type: 'agents/view' }).then(
@@ -56,14 +62,21 @@ export function AgentsPanel({ onPendingChange }: { onPendingChange?: (count: num
       () => setView({ status: 'not-offered' }),
     );
 
+  const loadBrowserFill = () =>
+    send({ type: 'agents/browserFillStatus' }).then(
+      (next) => setBrowserFill(next),
+      () => setBrowserFill(null),
+    );
+
   useEffect(() => {
     void load();
+    void loadBrowserFill();
     return onVaultChanged(() => void load());
   }, []);
 
   useEffect(() => {
     if (!view || !onPendingChange) return;
-    onPendingChange(view.status === 'open' ? view.requests.length : 0);
+    onPendingChange(view.status === 'open' ? view.requests.length + view.inbox.length : 0);
   }, [view, onPendingChange]);
 
   // Quietly refresh pending requests while the tab is open and idle so new asks appear without clicking Refresh.
@@ -276,6 +289,84 @@ export function AgentsPanel({ onPendingChange }: { onPendingChange?: (count: num
         )}
       </Section>
 
+      {/* Pending inbox entries saved by machines (`save_api_key`) */}
+      {view.inbox.length > 0 && (
+        <Section title={t('agents.inboxTitle')} description={t('agents.inboxDescription')}>
+          {view.inbox.map((entry) => {
+            const key = `${entry.machineId}:${entry.id}`;
+            const targetVaultId = inboxVaults[key] ?? view.vaults[0]?.id ?? '';
+            const meta = [entry.service, entry.environment, entry.hosts.join(', '), entry.env].filter(Boolean).join(' · ');
+            return (
+              <Row
+                key={key}
+                label={`${entry.machineName} · ${entry.title}`}
+                description={meta || entry.id}
+                control={
+                  <div className="flex flex-wrap items-center gap-2">
+                    {view.vaults.length > 0 && (
+                      <select
+                        aria-label={t('agents.inboxTargetVault')}
+                        value={targetVaultId}
+                        onChange={(event) => setInboxVaults((prev) => ({ ...prev, [key]: event.target.value }))}
+                        className="h-8 rounded-lg border border-neutral-200 bg-white px-2 text-[12.5px] text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+                      >
+                        {view.vaults.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={busy || !targetVaultId}
+                      data-testid={`agents-inbox-accept-${entry.id}`}
+                      onClick={() =>
+                        void run(async () =>
+                          setView(
+                            await send({
+                              type: 'agents/inboxAccept',
+                              machineId: entry.machineId,
+                              entryId: entry.id,
+                              vaultId: targetVaultId,
+                            }),
+                          ),
+                        )
+                      }
+                    >
+                      {t('agents.inboxAccept')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      data-testid={`agents-inbox-dismiss-${entry.id}`}
+                      onClick={() =>
+                        void run(async () =>
+                          setView(
+                            await send({
+                              type: 'agents/inboxDismiss',
+                              machineId: entry.machineId,
+                              entryId: entry.id,
+                            }),
+                          ),
+                        )
+                      }
+                    >
+                      {t('agents.inboxDismiss')}
+                    </Button>
+                  </div>
+                }
+              >
+                {entry.reason && <p className="text-[12.5px] text-neutral-600 dark:text-neutral-400">{t('agents.reason', { reason: entry.reason })}</p>}
+                {view.vaults.length === 0 && <p className="text-[12.5px] text-neutral-500 dark:text-neutral-400">{t('agents.inboxNeedVault')}</p>}
+              </Row>
+            );
+          })}
+        </Section>
+      )}
+
       {/* Keys the agent could read */}
       {view.exposed.length > 0 && (
         <Section title={t('agents.exposedTitle')} description={t('agents.exposedBody')} tone="danger">
@@ -387,7 +478,112 @@ export function AgentsPanel({ onPendingChange }: { onPendingChange?: (count: num
             >
               {t('agents.createToken')}
             </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              data-testid="agents-mcp-config-toggle"
+              onClick={() => {
+                setShowMcpConfig((prev) => !prev);
+                setMcpCopied(false);
+              }}
+            >
+              {t('agents.mcpConfigButton')}
+            </Button>
           </div>
+          {showMcpConfig && (
+            <div className="mt-3 flex flex-col gap-2.5 rounded-xl border border-neutral-200/80 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900" data-testid="agents-mcp-config">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-[13px] font-medium text-neutral-900 dark:text-neutral-100">{t('agents.mcpConfigTitle')}</div>
+                  <p className="text-[12px] text-neutral-600 dark:text-neutral-400">{t('agents.mcpConfigBody')}</p>
+                </div>
+                <Choice
+                  value={mcpClient}
+                  onChange={(next) => {
+                    setMcpClient(next);
+                    setMcpCopied(false);
+                  }}
+                  label={t('agents.mcpConfigTitle')}
+                  options={[
+                    { value: 'standard', label: 'MCP JSON' },
+                    { value: 'cursor', label: 'Cursor' },
+                    { value: 'vscode', label: 'VS Code' },
+                  ]}
+                />
+              </div>
+              <pre className="overflow-x-auto rounded-lg bg-white p-2.5 font-mono text-[12px] text-neutral-800 ring-1 ring-neutral-200/70 dark:bg-neutral-950 dark:text-neutral-200 dark:ring-neutral-800">
+                {buildMcpConfigSnippet(mcpClient).trimEnd()}
+              </pre>
+              <div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-testid="agents-mcp-config-copy"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(buildMcpConfigSnippet(mcpClient)).then(() => {
+                      setMcpCopied(true);
+                      setTimeout(() => setMcpCopied(false), 2000);
+                    });
+                  }}
+                >
+                  {mcpCopied ? t('agents.mcpConfigCopied') : t('agents.mcpConfigCopy')}
+                </Button>
+              </div>
+            </div>
+          )}
+          {browserFill && (
+            <div
+              className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-200/80 bg-neutral-50/70 px-3 py-2.5 dark:border-neutral-800 dark:bg-neutral-900/60"
+              data-testid="agents-browser-fill"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 text-[13px] font-medium text-neutral-900 dark:text-neutral-100">
+                  <span>{t('agents.browserFillTitle')}</span>
+                  {browserFill.enabled && browserFill.permission && (
+                    <span className="inline-flex items-center gap-1 text-[11.5px] font-normal text-neutral-600 dark:text-neutral-400">
+                      <StateDot good={browserFill.connected} />
+                      {browserFill.connected ? t('agents.browserFillConnected') : t('agents.browserFillWaiting')}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[12px] text-neutral-600 dark:text-neutral-400">{t('agents.browserFillBody')}</p>
+              </div>
+              {browserFill.enabled && browserFill.permission ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  data-testid="agents-browser-fill-disable"
+                  onClick={() =>
+                    void run(async () => {
+                      setBrowserFill(await send({ type: 'agents/browserFillSet', enabled: false }));
+                    })
+                  }
+                >
+                  {t('agents.browserFillDisable')}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  data-testid="agents-browser-fill-enable"
+                  onClick={() =>
+                    void run(async () => {
+                      const granted = chrome.permissions?.request
+                        ? await chrome.permissions.request({ permissions: ['nativeMessaging'] }).catch(() => false)
+                        : true;
+                      if (!granted) return;
+                      setBrowserFill(await send({ type: 'agents/browserFillSet', enabled: true }));
+                    })
+                  }
+                >
+                  {t('agents.browserFillEnable')}
+                </Button>
+              )}
+            </div>
+          )}
           {invitation && (
             <div className="mt-3 flex flex-col gap-2 rounded-xl bg-neutral-50 p-3 dark:bg-neutral-900">
               <p className="text-[12.5px] text-neutral-600 dark:text-neutral-400">{t('agents.inviteBody')}</p>
@@ -560,16 +756,28 @@ export function AgentsPanel({ onPendingChange }: { onPendingChange?: (count: num
           <Row
             label={t('agents.approvalLabel')}
             control={
-              <Choice
-                value={grantApproval}
-                onChange={setGrantApproval}
-                label={t('agents.approvalLabel')}
-                options={[
-                  { value: 'each', label: t('agents.approvalEach') },
-                  { value: 'session', label: t('agents.approvalSession') },
-                  { value: 'standing', label: t('agents.approvalStanding') },
-                ]}
-              />
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 text-[12.5px] text-neutral-700 dark:text-neutral-300">
+                  <input
+                    type="checkbox"
+                    checked={grantAllowFill}
+                    data-testid="agents-allow-fill-toggle"
+                    onChange={(event) => setGrantAllowFill(event.target.checked)}
+                    className="h-4 w-4 rounded border-neutral-300 accent-brand-600 dark:border-neutral-700"
+                  />
+                  <span>{t('agents.grantFill')}</span>
+                </label>
+                <Choice
+                  value={grantApproval}
+                  onChange={setGrantApproval}
+                  label={t('agents.approvalLabel')}
+                  options={[
+                    { value: 'each', label: t('agents.approvalEach') },
+                    { value: 'session', label: t('agents.approvalSession') },
+                    { value: 'standing', label: t('agents.approvalStanding') },
+                  ]}
+                />
+              </div>
             }
           />
         )}
@@ -691,7 +899,7 @@ export function AgentsPanel({ onPendingChange }: { onPendingChange?: (count: num
                                         machineId: m.id,
                                         vaultId: vault.id,
                                         itemId: item.id,
-                                        uses: ['request', 'run'],
+                                        uses: grantAllowFill ? ['request', 'run', 'fill'] : ['request', 'run'],
                                         approval: grantApproval,
                                       }),
                                     ),

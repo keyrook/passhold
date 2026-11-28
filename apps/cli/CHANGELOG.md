@@ -1,5 +1,23 @@
 # Passhold CLI: changes
 
+## 0.4.0
+
+- Sealed agent inbox (`save_api_key` MCP tool and `passhold machine inbox
+  list|accept|dismiss`): enrolled machines can seal newly created API keys
+  directly into your Passhold inbox for review before saving to an agent vault.
+  Passing `from_command` executes the command directly (`shell: false`) and
+  seals stdout straight into Passhold without returning the secret to the agent.
+- Bulk `.env` import (`passhold import --env <file> [--vault <vault> |
+  --agent-vault <vault>]`): imports API keys into a personal, shared or agent
+  vault, skipping duplicates and existing `passhold://` references.
+- One-command MCP client config (`passhold machine config --client
+  standard|cursor|vscode|raw`) outputting ready-to-paste configuration for
+  `passhold mcp`.
+- Browser login filling (`fill_login` MCP tool, `passhold mcp --install-browser`,
+  `passhold mcp --native-host`): fills granted website logins in your browser
+  over an owner-only local native messaging bridge without ever returning
+  passwords to the agent.
+
 ## 0.3.0
 
 - Machines and agents: a separate, sealed vault for automation and coding tools

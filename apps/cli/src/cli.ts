@@ -27,6 +27,7 @@ import {
   isPassholdError,
   loginCopy,
   planAllows,
+  readEnvApiKeys,
   readLinkedCodes,
   restoreLogin,
   restoreWalletItem,
@@ -49,11 +50,13 @@ import {
   ensureMachineConfirmed,
   envMachineToken,
   hasPassholdSession,
+  importEnvToAgentVault,
   loadMachineIdentity,
   pullMachineIntoCache,
   resolveMachineReference,
   runMachine,
 } from './machine.js';
+import { installBrowserHost, startNativeHost, type NativeBrowser } from './mcp/native-host.js';
 import { runMcpServer } from './mcp/server.js';
 import {
   CliError,
@@ -130,6 +133,7 @@ const USAGE = `passhold ${VERSION}
   passhold generate [--length <n>] [--no-lower] [--no-upper] [--no-digits] [--no-symbols] [--ambiguous]
   passhold run [--env-file <file>] -- <command> [arguments]
   passhold inject [--in <file>] [--out <file>]
+  passhold import --env <file> [--vault <vault> | --agent-vault <vault>]
   passhold export [--format csv|json] [--kind apikey] [--out <file>] [--recovery-key]
   passhold totp <passhold://vault/item | item>
   passhold send [<text> | passhold://vault/item | --file <path>] [--opens <n>] [--expires 1h|1d|7d|30d] [--password]
@@ -139,8 +143,8 @@ const USAGE = `passhold ${VERSION}
   passhold file rm <item> <file>
   passhold ssh-agent [--socket <path>] [--no-confirm]
   passhold approve [--recovery-key | --with-browser] [--machine <id>]
-  passhold machine <enroll|status|pull|init|list|invite|confirm|token|grant|withdraw|rekey|remove|stop-all|resume|renew|forget|exposed|audit|move|send-back|reset|vault> …
-  passhold mcp
+  passhold machine <enroll|status|pull|config|init|list|invite|confirm|token|grant|withdraw|rekey|remove|stop-all|resume|renew|forget|exposed|audit|inbox|move|send-back|reset|vault> …
+  passhold mcp [--install-browser [chrome|edge|firefox]] [--native-host]
 
 A reference is passhold://vault/item/field. The vault's own is "${OWN_VAULT}",
 a family's shared vault is its name; an item is its id or its name; a field
@@ -176,7 +180,7 @@ interface Args {
 }
 
 /** Flags that take no value; any other takes the word after it, or what follows `=`. */
-const SWITCHES = new Set(['google', 'github', 'json', 'raw', 'recovery-key', 'with-browser', 'password', 'no-lower', 'no-upper', 'no-digits', 'no-symbols', 'ambiguous', 'generate', 'no-confirm', 'wait', 'no-rekey', 'keys-replaced', 'help', 'version']);
+const SWITCHES = new Set(['google', 'github', 'json', 'raw', 'recovery-key', 'with-browser', 'password', 'no-lower', 'no-upper', 'no-digits', 'no-symbols', 'ambiguous', 'generate', 'no-confirm', 'wait', 'no-rekey', 'keys-replaced', 'install-browser', 'native-host', 'help', 'version']);
 
 function parse(argv: string[]): Args {
   const args: Args = { positional: [], flags: new Map(), rest: [] };
@@ -191,7 +195,7 @@ function parse(argv: string[]): Args {
       continue;
     }
     const [name, inline] = word.slice(2).split(/=(.*)/s) as [string, string | undefined];
-    if (SWITCHES.has(name)) args.flags.set(name, true);
+    if (SWITCHES.has(name)) args.flags.set(name, inline ?? true);
     else if (inline !== undefined) args.flags.set(name, inline);
     else if (at + 1 < argv.length) args.flags.set(name, argv[++at]!);
     else throw new CliError(`--${name} needs a value.`);
@@ -666,6 +670,41 @@ async function command(context: Context): Promise<number> {
       return 0;
     }
 
+    case 'import': {
+      const envPath = text(args, 'env');
+      if (!envPath) throw new CliError('Usage: passhold import --env <file> [--vault <vault> | --agent-vault <vault>]');
+      const envText = readFileSync(envPath, 'utf8');
+      const agentVault = text(args, 'agent-vault');
+      if (agentVault) {
+        const imported = await importEnvToAgentVault(context, envText, agentVault, { store, account, now, say });
+        say(
+          `Imported ${imported.added} API key${imported.added === 1 ? '' : 's'} into agent vault "${imported.vaultName}"${imported.skipped ? ` (${imported.skipped} duplicate${imported.skipped === 1 ? '' : 's'} skipped)` : ''}.`,
+        );
+        return 0;
+      }
+      const named = text(args, 'vault') ?? OWN_VAULT;
+      const opened = await open(reachesShared([`${SCHEME}${encodeURIComponent(named)}/`]));
+      const vault = vaultNamed(opened.data, named);
+      writable(vault);
+      const vaultData = {
+        items: vault.items.filter(isLogin),
+        wallet: vault.items.filter((item): item is WalletItem => !isLogin(item)),
+      };
+      const parsed = readEnvApiKeys(envText, vaultData);
+      const drafts = parsed.wallet.filter((draft) => draft.kind === 'apikey');
+      const at = now();
+      const addedIds = await account.writeMany(
+        opened.unlocked,
+        opened,
+        vault,
+        drafts.map((draft, index) => adding('apikey', draft, at + index)),
+      );
+      say(
+        `Imported ${addedIds.length} API key${addedIds.length === 1 ? '' : 's'} into ${placeName(vault)}${parsed.duplicates ? ` (${parsed.duplicates} duplicate${parsed.duplicates === 1 ? '' : 's'} skipped)` : ''}.`,
+      );
+      return 0;
+    }
+
     case 'export': {
       const format = text(args, 'format') ?? 'csv';
       if (format !== 'csv' && format !== 'json') throw new CliError('--format is csv or json.');
@@ -752,8 +791,35 @@ async function command(context: Context): Promise<number> {
     case 'machine':
       return runMachine(context, args.positional, { store, account, now, say, flags: args.flags });
 
-    case 'mcp':
+    case 'mcp': {
+      if (args.flags.has('native-host')) {
+        const handle = await startNativeHost({ home: store.home, signal: context.signal });
+        await handle.done;
+        return 0;
+      }
+      if (args.flags.has('install-browser')) {
+        const raw = args.flags.get('install-browser');
+        const choice = (typeof raw === 'string' && raw !== 'true' ? raw : args.positional[0] ?? 'chrome').toLowerCase();
+        const allowed: readonly NativeBrowser[] = ['chrome', 'edge', 'firefox'];
+        if (!allowed.includes(choice as NativeBrowser)) {
+          throw new CliError(`Browser must be one of: ${allowed.join(', ')}`);
+        }
+        const extraId = text(args, 'extension-id');
+        const installed = installBrowserHost({
+          browser: choice as NativeBrowser,
+          home: store.home,
+          command: text(args, 'command') ?? 'passhold',
+          ...(text(args, 'dir') ? { dir: text(args, 'dir') } : {}),
+          ...(extraId ? { extensionIds: [extraId] } : {}),
+          env: context.env,
+        });
+        context.out(`${installed.manifestPath}\n`);
+        say(`Installed Passhold native messaging host for ${installed.browser}: ${installed.manifestPath}`);
+        say('Next: enable "Browser fill for agents" in Passhold extension → Settings → Agents.');
+        return 0;
+      }
       return runMcpServer(context, { store, account, now, say });
+    }
 
     default:
       throw new CliError(`No command "${name}". Run: passhold help`);

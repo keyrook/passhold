@@ -1,6 +1,6 @@
 {
   "name": "@passhold/cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Passhold in a terminal: secrets by passhold:// references in every vault, the family's shared ones among them, and an SSH agent.",

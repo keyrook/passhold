@@ -8,6 +8,8 @@ import { request } from './http.js';
 import type {
   MachineEnrollmentStatus,
   MachineEnrollRequest,
+  MachineInboxReceipt,
+  MachineInboxSubmission,
   MachineLogAck,
   MachineLogBatch,
   MachinePull,
@@ -86,5 +88,10 @@ export class MachineClient {
   /** Sends a batch of the log: what was kept, refused for want of room, or refused for a place already taken. */
   async log(credential: MachineCredential, batch: MachineLogBatch): Promise<MachineLogAck> {
     return this.call<MachineLogAck>('/machine/log', { method: 'POST', body: JSON.stringify(batch) }, MachineClient.machine(credential));
+  }
+
+  /** Hands the person a sealed inbox entry to review and accept into an agent vault; the same again is answered as it was. */
+  async submitInbox(credential: MachineCredential, body: MachineInboxSubmission): Promise<MachineInboxReceipt> {
+    return this.call<MachineInboxReceipt>('/machine/inbox', { method: 'POST', body: JSON.stringify(body) }, MachineClient.machine(credential));
   }
 }
